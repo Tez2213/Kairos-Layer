@@ -1,15 +1,44 @@
-import { createPublicClient, http } from "viem";
+import { createPublicClient, fallback, http } from "viem";
 import { sepolia } from "viem/chains";
 import { DEPLOYMENTS } from "./generated";
 
-export const RPC_URL =
-  process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
-
 export const CHAIN = sepolia;
+
+/** Public Sepolia endpoints, all verified to send permissive CORS headers. */
+const PUBLIC_RPCS = [
+  "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://sepolia.drpc.org",
+  "https://1rpc.io/sepolia",
+];
+
+const isBrowser = typeof window !== "undefined";
+
+/**
+ * Read endpoints, in priority order:
+ *   1. NEXT_PUBLIC_SEPOLIA_RPC_URL — a dedicated endpoint, if you set one.
+ *      NOTE: anything NEXT_PUBLIC_ is visible in the browser bundle, so only
+ *      put a domain-restricted key here.
+ *   2. /api/rpc — same-origin proxy that reads the SERVER-side SEPOLIA_RPC_URL,
+ *      which keeps a private key out of the client entirely.
+ *   3. Public endpoints, as redundancy.
+ *
+ * viem's fallback transport retries the next endpoint on failure, so a single
+ * rate-limited provider cannot take the app down.
+ */
+const RPC_URLS = [
+  ...(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ? [process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL] : []),
+  ...(isBrowser ? ["/api/rpc"] : []),
+  ...PUBLIC_RPCS,
+];
+
+export const RPC_URL = RPC_URLS[0];
 
 export const publicClient = createPublicClient({
   chain: sepolia,
-  transport: http(RPC_URL),
+  transport: fallback(
+    RPC_URLS.map((url) => http(url, { timeout: 15_000, retryCount: 1 })),
+    { rank: false },
+  ),
 });
 
 export const A = {

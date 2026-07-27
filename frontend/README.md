@@ -10,15 +10,29 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
-Optionally point at a private RPC (a public one is used by default):
+**No environment variables are required.** The app falls back to public Sepolia
+endpoints and the contract addresses are compiled into `lib/generated.ts`.
 
-```
-NEXT_PUBLIC_SEPOLIA_RPC_URL=https://...
-```
+## Deploying (Vercel)
+
+Import the repo, set the root directory to `frontend`, and deploy. Nothing else is
+needed. For a public demo, however, a dedicated RPC endpoint is worth setting so a
+rate-limited public node cannot degrade the app:
+
+| Variable | Where | Notes |
+| --- | --- | --- |
+| `SEPOLIA_RPC_URL` | server-side (recommended) | Used by the `/api/rpc` proxy. The key never reaches the browser. |
+| `NEXT_PUBLIC_SEPOLIA_RPC_URL` | client-side (alternative) | One less hop, but **embedded in the JS bundle** — only use a domain-restricted key. |
+
+Reads use a viem `fallback` transport across your endpoint, the same-origin proxy and
+three public nodes, so a single provider failing does not take the app down. The
+proxy only forwards read methods; signing always happens in the user's wallet.
+
+See `.env.example`. Everything else — the iExec Nox gateway, KMS and subgraph — is
+resolved automatically by `@iexec-nox/handle` from the chain id.
 
 Contract addresses and ABIs live in `lib/generated.ts`, produced from
-`contracts/artifacts` and `contracts/deployments.json`. Regenerate it after any
-redeployment.
+`contracts/artifacts` and `contracts/deployments.json`. Regenerate after redeploying.
 
 ## The twelve pages
 

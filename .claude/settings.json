@@ -70,7 +70,15 @@
       "Bash(disown)",
       "Bash(curl -s -o /dev/null http://localhost:3000/)",
       "Bash(curl -s -o /dev/null -w \"trade=%{http_code}\\\\n\" http://localhost:3000/trade)",
-      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=14000 --screenshot=trade.png --window-size=1280,1250 --hide-scrollbars \"http://localhost:3000/trade\")"
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=14000 --screenshot=trade.png --window-size=1280,1250 --hide-scrollbars \"http://localhost:3000/trade\")",
+      "Bash(sed -i 's|^\\\\.env\\\\*$|.env*\\\\n!.env.example|' .gitignore)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/rpc -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/rpc -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xfced18bc0ea5c90b6307f403aa0f21f291b7b7a5\",\"data\":\"0x4e69d560\"},\"latest\"]}')",
+      "Bash(curl -s -w \" <- HTTP %{http_code}\\\\n\" -X POST http://localhost:3000/api/rpc -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendRawTransaction\",\"params\":[\"0xdead\"]}')",
+      "Bash(node sel.mjs)",
+      "Bash(curl -s -X POST http://localhost:3000/api/rpc -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xfced18bc0ea5c90b6307f403aa0f21f291b7b7a5\",\"data\":\"__TRACKED_VAR__\"},\"latest\"]}')",
+      "Bash(python3 -c \"import json,sys; r=json.load\\(sys.stdin\\); print\\('currentEpochId =', int\\(r['result'],16\\) if 'result' in r else r\\)\")"
     ]
   }
 }
