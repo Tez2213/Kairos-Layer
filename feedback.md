@@ -102,4 +102,29 @@ pool on Nox. Kept chronologically during development, not backfilled.
     or a warning when a transaction ends with handles that only ever received
     transient grants would eliminate an entire bug class.
 
+## Running on real Sepolia (vs the local stack)
+
+19. **Win: zero code changes between the local stack and live Sepolia.** The same
+    contracts and the same `@iexec-nox/handle` calls worked unmodified; the SDK ships
+    Sepolia in `NETWORK_CONFIGS`, so `createViemHandleClient(wallet)` needs no config
+    at all. Migrating from local tests to a live testnet was genuinely a non-event —
+    rare, and worth saying out loud.
+20. **TEE round-trips are much slower live, and that changes protocol design.** Local
+    `publicDecrypt` resolves in well under a second; on Sepolia it took tens of seconds
+    (ingestor → runner → gateway across real blocks). Anything time-boxed on-chain must
+    budget for it. Concretely: our first live run failed because a 60-second epoch
+    could not fit four orders that each need a gateway round-trip plus a ~12s block —
+    the last order landed in the block whose timestamp *equalled* `endTime` and was
+    correctly rejected. Fix was to pre-encrypt off-chain and submit concurrently.
+    A "typical latency" figure in the docs would help teams size their timeouts.
+21. **`encryptInput` is independent of contract state, which is very useful.** Handles
+    bind to (owner, target contract) only, so inputs can be encrypted *before* a
+    deadline-sensitive window opens and submitted in a burst. Worth documenting as a
+    pattern — it is the difference between a working and a broken batch protocol.
+22. **Handle-resolution latency needs a public "is it ready" API.** The hardhat plugin
+    has `waitForHandlesResolved` against `/v0/public/handles/status`, but that endpoint
+    rejected our calls on the hosted gateway (`chain_id 0 not configured`) and the
+    helper is not exported from the SDK. We fell back to retrying `decrypt` in a loop.
+    Exposing a supported readiness check in `@iexec-nox/handle` would remove the guesswork.
+
 *(log continues as development proceeds)*

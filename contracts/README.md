@@ -24,6 +24,24 @@ oracle cardinality 10.
 
 Anyone can mint test tokens via `faucet(amount)` on tUSDC/tWETH.
 
+### Verified end-to-end on live Sepolia
+
+`node scripts/e2e-sepolia.mjs` runs the complete flow against the deployed contracts
+with four real wallets and no mocks. Result of epoch 3:
+
+| | |
+| --- | --- |
+| Orders | 2 buys (1,000 + 500 tUSDC) · 2 sells (0.2 + 0.1 tWETH), all amounts encrypted |
+| Internally crossed | **609.02 tUSDC — never touched the public chain** |
+| Sent to Uniswap V3 | 890.98 tUSDC (the residual only) |
+| Payouts | 0.490438 / 0.245219 cWETH to buyers · 406.0124 / 203.0062 cUSDC to sellers — all exactly pro-rata |
+| Privacy | a non-owner decrypting another user's order handle was **denied** by the Nox ACL; the owner decrypted their own successfully |
+
+**Timing constraint worth knowing:** epochs must be long enough for each order's
+gateway round-trip plus a Sepolia block. A 60s window is too short — a live order was
+rejected for landing in the block whose timestamp equalled `endTime`. The script uses
+180s and pre-encrypts orders before submitting them concurrently.
+
 ## Contracts
 
 | Contract | Purpose |

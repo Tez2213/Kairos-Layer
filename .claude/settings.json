@@ -46,7 +46,15 @@
       "Bash(python3 -c \"import json,sys; print\\(int\\(json.load\\(sys.stdin\\)['result'],16\\), 'txs sent'\\)\")",
       "Bash(cp /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/smoke.mjs /home/ujwal/Desktop/hackathon/contracts/scripts/smoke-sepolia.mjs)",
       "Bash(node scripts/smoke-sepolia.mjs)",
-      "Bash(python3 -c \"import json,sys; w=int\\(json.load\\(sys.stdin\\)['result'],16\\); print\\(f'Deployer balance remaining: {w/1e18:.5f} ETH  \\(spent ~{0.024366-w/1e18:.5f}\\)'\\)\")"
+      "Bash(python3 -c \"import json,sys; w=int\\(json.load\\(sys.stdin\\)['result'],16\\); print\\(f'Deployer balance remaining: {w/1e18:.5f} ETH  \\(spent ~{0.024366-w/1e18:.5f}\\)'\\)\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} in %{time_total}s\\\\n\" https://gateway-testnets.noxprotocol.dev/)",
+      "Bash(curl -s -X POST https://gateway-testnets.noxprotocol.dev/v0/public/handles/status -H \"Content-Type: application/json\" -d '{\"handles\":[\"0x0000000000000000000000000000000000000000000000000000000000000000\"]}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(node scripts/e2e-sepolia.mjs)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(cp /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/diag.mjs /home/ujwal/Desktop/hackathon/contracts/scripts/_diag.mjs)",
+      "Bash(node scripts/_diag.mjs)",
+      "Bash(node --check scripts/e2e-sepolia.mjs)",
+      "Bash(python3 -c \"import json,sys; print\\(f\\\\\"deployer gas: {int\\(json.load\\(sys.stdin\\)['result'],16\\)/1e18:.5f} ETH\\\\\"\\)\")"
     ]
   }
 }
