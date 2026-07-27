@@ -32,6 +32,42 @@ that touches user balances.
 Steps 2 and 4 wait on the trusted enclave, which takes tens of seconds on a live
 network; the keeper polls patiently rather than failing.
 
+## Running it in production (no server needed)
+
+`.github/workflows/keeper.yml` runs `npm run once` every 5 minutes on GitHub's
+runners. Add two repository secrets and it is live:
+
+| Secret | Value |
+| --- | --- |
+| `KEEPER_PRIVATE_KEY` | a burner key holding only gas |
+| `SEPOLIA_RPC_URL` | optional; a dedicated endpoint |
+
+This is a real deployment, not a demo shortcut: the workflow is public, so anyone
+can see settlement is automated, and the run history is evidence it keeps working.
+Secrets are not exposed to fork pull requests, and the key is powerless beyond
+paying gas.
+
+Alternatives if you prefer: any always-on VM under `systemd`/`pm2` running
+`npm start`. Avoid serverless functions — the enclave round-trip during `reveal`
+can exceed a function's execution limit.
+
+### Why gas cost is bounded
+
+Sealing costs ~120k gas, and an epoch that expires must be sealed before the next
+opens. Rolling an idle pool every few minutes would burn ~0.06 ETH/day for nobody:
+
+| Epoch length | Seals/day if rolled eagerly | Cost/day |
+| --- | --- | --- |
+| 3 min | 480 | ~0.059 ETH |
+| 10 min | 144 | ~0.018 ETH |
+| 30 min | 48 | ~0.006 ETH |
+
+So the keeper seals **immediately when a batch has orders** (users are waiting) but
+lets **empty** batches age, rolling them only every `KEEPER_SEAL_EMPTY_AFTER_S`
+seconds (default 1800). A trader arriving at an expired empty batch can open the
+next one themselves from the trade page for the same trivial gas. Cost therefore
+tracks usage rather than the clock.
+
 ## Operational notes
 
 - `KEEPER_INTERVAL_MS` (default 20000) sets the tick rate.

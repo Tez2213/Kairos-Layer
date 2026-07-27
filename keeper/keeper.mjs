@@ -31,6 +31,18 @@ const ONCE = process.argv.includes("--once");
 const DRY = process.argv.includes("--dry-run");
 const INTERVAL_MS = Number(process.env.KEEPER_INTERVAL_MS ?? 20_000);
 
+/**
+ * An epoch that expires with orders in it MUST be sealed — users are waiting.
+ * An epoch that expires EMPTY only needs sealing so the next one can open, and
+ * sealing costs ~120k gas every time. Rolling an idle pool every few minutes
+ * burns real money for nobody's benefit, so empty epochs are left to age and
+ * rolled on a slower cadence. A trader who arrives meanwhile can open the next
+ * epoch themselves from the UI for the same trivial gas.
+ *
+ * Net effect: keeper cost scales with usage, not with the clock.
+ */
+const SEAL_EMPTY_AFTER_S = Number(process.env.KEEPER_SEAL_EMPTY_AFTER_S ?? 1800);
+
 // ---------- config ----------
 
 const root = new URL("../contracts/", import.meta.url);
@@ -130,8 +142,19 @@ async function tick() {
     try {
       // 1. seal a closed window
       if (e.state === 1 && now >= Number(e.endTime)) {
-        log(`epoch ${id}: window closed (${e.buyCount}B/${e.sellCount}S) → seal`);
-        await send("seal", [], "seal");
+        const hasOrders = e.buyCount > 0 || e.sellCount > 0;
+        const idleFor = now - Number(e.endTime);
+        if (hasOrders) {
+          log(`epoch ${id}: window closed with ${e.buyCount}B/${e.sellCount}S → seal`);
+          await send("seal", [], "seal");
+        } else if (idleFor >= SEAL_EMPTY_AFTER_S) {
+          log(`epoch ${id}: empty and idle ${Math.round(idleFor / 60)}min → rolling forward`);
+          await send("seal", [], "seal");
+        } else {
+          log(
+            `epoch ${id}: empty, expired ${idleFor}s ago — holding (rolls at ${SEAL_EMPTY_AFTER_S}s, or when a trader opens it)`,
+          );
+        }
         continue;
       }
 

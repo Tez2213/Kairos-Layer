@@ -1,0 +1,55 @@
+name: Settlement keeper
+
+# Keeps the deployed pool alive without a server.
+#
+# Runs the same permissionless crank a user could run by hand: seal batches that
+# have closed with orders in them, fetch enclave proofs, net the sides, swap the
+# residual, and rescue anything stuck past its timeout.
+#
+# It holds no privilege. If this workflow is disabled, the protocol still works —
+# users can settle from the UI, and the contract's timeouts guarantee refunds.
+
+on:
+  schedule:
+    # Every 5 minutes (GitHub's minimum). Runs are often delayed a few minutes
+    # under load; that is fine, since every action is idempotent.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # let a human trigger it during a demo
+
+concurrency:
+  group: kairos-keeper
+  cancel-in-progress: false # never interrupt a settlement mid-flight
+
+jobs:
+  crank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: keeper/package-lock.json
+
+      - name: Install keeper
+        working-directory: keeper
+        run: npm ci
+
+      # The keeper reads contracts/.env; in CI we synthesise it from secrets so
+      # no key is ever committed. KEEPER_PRIVATE_KEY must be a burner that holds
+      # gas and nothing else — it cannot touch user funds even if leaked.
+      - name: Configure
+        run: |
+          {
+            echo "SEPOLIA_RPC_URL=${{ secrets.SEPOLIA_RPC_URL }}"
+            echo "KEEPER_PRIVATE_KEY=${{ secrets.KEEPER_PRIVATE_KEY }}"
+          } > contracts/.env
+
+      - name: Run one settlement pass
+        working-directory: keeper
+        env:
+          # Roll an idle pool at most twice an hour so gas tracks real usage.
+          KEEPER_SEAL_EMPTY_AFTER_S: "1800"
+        run: npm run once

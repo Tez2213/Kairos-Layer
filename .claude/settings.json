@@ -84,7 +84,13 @@
       "Bash(curl -s http://localhost:3000/proof)",
       "Bash(grep -oE \"Error[^<]{0,200}|Cannot find[^<]{0,150}|Module not found[^<]{0,150}\")",
       "Bash(grep -vE \"^\\\\s*$\")",
-      "Bash(awk '{print $5}')"
+      "Bash(awk '{print $5}')",
+      "Bash(cp /tmp/gascheck.mjs ./gascheck.mjs)",
+      "Bash(node gascheck.mjs)",
+      "Bash(cp /tmp/gascheck.mjs gascheck.mjs)",
+      "Bash(rm -f gascheck.mjs)",
+      "Bash(node --check keeper.mjs)",
+      "Bash(KEEPER_SEAL_EMPTY_AFTER_S=1800 timeout 90 npm run dry)"
     ]
   }
 }

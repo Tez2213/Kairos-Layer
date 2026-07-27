@@ -31,7 +31,7 @@ export default function Trade() {
 
   const [isBuy, setIsBuy] = useState(true);
   const [amount, setAmount] = useState("500");
-  const [stage, setStage] = useState<"idle" | "encrypting" | "signing">("idle");
+  const [stage, setStage] = useState<"idle" | "encrypting" | "signing" | "sealing">("idle");
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string }>();
   const [lastHandle, setLastHandle] = useState<string>();
 
@@ -65,6 +65,29 @@ export default function Trade() {
       setMsg({ kind: "ok", text: "Order accepted. Your amount is encrypted on-chain." });
       refetchEpoch();
       refetchPos();
+    } catch (e) {
+      setMsg({ kind: "err", text: revertReason(e) });
+    } finally {
+      setStage("idle");
+    }
+  };
+
+  /** Seal the expired batch so a fresh one opens — anyone may do this. */
+  const openNextEpoch = async () => {
+    if (!walletClient) return;
+    setMsg(undefined);
+    setStage("sealing");
+    try {
+      await sendTx(walletClient, {
+        address: A.pool,
+        abi: KAIROS_POOL_ABI,
+        functionName: "seal",
+        args: [],
+        account: walletClient.account!,
+        chain: walletClient.chain,
+      } as never);
+      setMsg({ kind: "ok", text: "New epoch open — you can place an order now." });
+      refetchEpoch();
     } catch (e) {
       setMsg({ kind: "err", text: revertReason(e) });
     } finally {
@@ -146,10 +169,24 @@ export default function Trade() {
             </div>
           </div>
         </Panel>
-        {epoch && (epoch.state !== 1 || secondsLeft <= 0) && (
+        {epoch && epoch.state === 1 && secondsLeft <= 0 && (
+          <div className="mt-3 border border-rule bg-card px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-[13.5px] text-ink-2 max-w-[54ch]">
+              This batch has closed. Opening the next one is permissionless — you can do it
+              yourself right now for a few cents of gas, rather than waiting for a keeper.
+            </p>
+            {address ? (
+              <Button onClick={openNextEpoch} busy={stage === "sealing"}>
+                Open the next epoch
+              </Button>
+            ) : (
+              <Button onClick={connect}>Connect wallet</Button>
+            )}
+          </div>
+        )}
+        {epoch && epoch.state !== 1 && (
           <p className="text-[13px] text-ink-3 mt-2">
-            This epoch is closed to new orders. A fresh one opens the moment anyone seals it —
-            which you can do yourself on the{" "}
+            This epoch is settling. A fresh one opens as soon as it is sealed — follow along on the{" "}
             <Link href="/settle" className="underline underline-offset-2">
               settlement desk
             </Link>
