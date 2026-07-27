@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.iex.ec)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:linktr.ee)",
+      "WebFetch(domain:docs.noxprotocol.io)",
+      "Bash(curl -s \"https://registry.npmjs.org/-/v1/search?text=scope:iexec-nox&size=25\")",
+      "Bash(curl -s \"https://api.github.com/orgs/iExec-Nox/repos?per_page=100\")",
+      "Bash(python3 -c \"import json,sys; [print\\(f\\\\\"{r['name']}: {r.get\\('description'\\) or ''} [{r.get\\('language'\\)}] updated {r['updated_at'][:10]}\\\\\"\\) for r in json.load\\(sys.stdin\\)]\")",
+      "Bash(curl -sL \"https://docs.noxprotocol.io/getting-started/networks\")",
+      "Bash(grep -oE '0x[a-fA-F0-9]{40}|[Cc]hain[ _-]?[Ii][Dd][^<]{0,20}|Sepolia|Arbitrum|NoxCompute[A-Za-z]*')",
+      "WebFetch(domain:cdefi-wizard.iex.ec)",
+      "WebFetch(domain:docs.uniswap.org)",
+      "WebFetch(domain:developers.uniswap.org)"
+    ]
+  }
+}
