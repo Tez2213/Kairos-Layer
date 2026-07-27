@@ -54,7 +54,23 @@
       "Bash(cp /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/diag.mjs /home/ujwal/Desktop/hackathon/contracts/scripts/_diag.mjs)",
       "Bash(node scripts/_diag.mjs)",
       "Bash(node --check scripts/e2e-sepolia.mjs)",
-      "Bash(python3 -c \"import json,sys; print\\(f\\\\\"deployer gas: {int\\(json.load\\(sys.stdin\\)['result'],16\\)/1e18:.5f} ETH\\\\\"\\)\")"
+      "Bash(python3 -c \"import json,sys; print\\(f\\\\\"deployer gas: {int\\(json.load\\(sys.stdin\\)['result'],16\\)/1e18:.5f} ETH\\\\\"\\)\")",
+      "Bash(mkdir -p frontend/lib)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(which chromium *)",
+      "Read(//usr/bin/**)",
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --screenshot=home.png --window-size=1280,1700 --hide-scrollbars http://localhost:3000/)",
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=15000 --screenshot=home2.png --window-size=1280,900 --hide-scrollbars http://localhost:3000/)",
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=12000 --screenshot=epochs.png --window-size=1280,1300 --hide-scrollbars http://localhost:3000/epochs)",
+      "Bash(echo \"TS=$?\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/trade)",
+      "Bash(kill 6641)",
+      "Bash(nohup npm run dev)",
+      "Bash(disown)",
+      "Bash(curl -s -o /dev/null http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"trade=%{http_code}\\\\n\" http://localhost:3000/trade)",
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=14000 --screenshot=trade.png --window-size=1280,1250 --hide-scrollbars \"http://localhost:3000/trade\")"
     ]
   }
 }

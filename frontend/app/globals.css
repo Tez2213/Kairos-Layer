@@ -1,26 +1,117 @@
 @import "tailwindcss";
 
+/*
+  Kairos Layer — visual language.
+
+  Printed-matter palette (warm paper, ink) rather than the usual dark-crypto
+  gradient. Colour is SEMANTIC, never decorative:
+    ink     — neutral structure
+    sealed  — anything encrypted / private
+    exposed — anything public on-chain
+  Data is always monospace; prose is sans; page titles use a serif display face.
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #f4f1ea;
+  --paper-2: #eae6dc;
+  --card: #fbf9f5;
+  --ink: #16150f;
+  --ink-2: #4a4740;
+  --ink-3: #837f74;
+  --rule: #d5cfc1;
+  --rule-2: #c2bbaa;
+
+  --sealed: #14594a;
+  --sealed-bg: #e2ece7;
+  --exposed: #a83b12;
+  --exposed-bg: #f6e6dc;
+  --warn: #8a6d1f;
+  --warn-bg: #f3ecd8;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+  --color-sealed: var(--sealed);
+  --color-sealed-bg: var(--sealed-bg);
+  --color-exposed: var(--exposed);
+  --color-exposed-bg: var(--exposed-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+  --font-display: var(--font-display);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-plex-sans), system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numerals line up in tables and stat blocks. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Thin, deliberate focus ring — no default blue glow. */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+input,
+select {
+  font-family: var(--font-plex-mono), monospace;
+}
+
+/* Hide number spinners: amounts are typed, not nudged. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+@keyframes kairos-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse {
+  animation: kairos-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes kairos-dash {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.flowline {
+  stroke-dasharray: 5 3;
+  animation: kairos-dash 1.1s linear infinite;
 }

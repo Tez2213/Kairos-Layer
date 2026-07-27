@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kairos Layer — Frontend
 
-## Getting Started
+Next.js app for the confidential dark pool. Talks directly to the deployed Sepolia
+contracts and to the iExec Nox enclave; there is no backend and no mock data.
 
-First, run the development server:
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Optionally point at a private RPC (a public one is used by default):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_SEPOLIA_RPC_URL=https://...
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Contract addresses and ABIs live in `lib/generated.ts`, produced from
+`contracts/artifacts` and `contracts/deployments.json`. Regenerate it after any
+redeployment.
 
-## Learn More
+## The twelve pages
 
-To learn more about Next.js, take a look at the following resources:
+| # | Route | Purpose |
+| --- | --- | --- |
+| 01 | `/` | What the protocol is, live chain state, cumulative privacy figures |
+| 02 | `/how-it-works` | The six-step lifecycle, worked through with real numbers |
+| 03 | `/privacy` | Exactly what is hidden vs public, plus a live access-control demo |
+| 04 | `/architecture` | Layer map, how a value travels, the settlement state machine |
+| 05 | `/start` | Faucet → wrap → authorise: the three transactions to get trading |
+| 06 | `/trade` | Encrypt an amount client-side and submit it |
+| 07 | `/balances` | Decrypt your own confidential balances; claim payouts and refunds |
+| 08 | `/epochs` | Every batch, with crossed-vs-routed proportions |
+| 09 | `/epochs/[id]` | One batch in full detail, including the raw storage record |
+| 10 | `/settle` | Run the permissionless crank yourself, step by step |
+| 11 | `/security` | Audit findings, invariants, liveness guarantees |
+| 12 | `/contracts` · `/faq` | Live parameters and addresses; the awkward questions answered |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Design notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The palette is semantic rather than decorative: **green means encrypted**, **orange
+means public on-chain**. Anything a viewer must not be able to read renders as a
+`▓▓▓▓` cipher block instead of a number, so the privacy boundary is visible at a
+glance rather than only described in prose.
 
-## Deploy on Vercel
+Data is monospace with tabular figures, prose is sans, page titles use a serif
+display face. Diagrams are hand-written inline SVG — no chart library.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/              one directory per page
+components/ui     panels, stats, badges, buttons, callouts
+components/       diagrams — lifecycle strip, netting bar, state machine, stack map
+lib/chain         addresses, epoch-state vocabulary, explorer links
+lib/hooks         polling reads against the deployed contract
+lib/nox           Nox handle client + retry helpers for enclave round-trips
+lib/wallet        minimal EIP-1193 connection (one chain, one account)
+lib/generated     ABIs + addresses, generated from the contracts build
+```
