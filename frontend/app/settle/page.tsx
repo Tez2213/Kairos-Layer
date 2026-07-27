@@ -325,7 +325,7 @@ export default function Settle() {
         </p>
       </Section>
 
-      <NextUp href="/security" label="Security" />
+      <NextUp href="/proof" label="Proof of no leakage" />
     </>
   );
 }

@@ -64,7 +64,7 @@ export default function Security() {
   return (
     <>
       <PageHeader
-        index="10 — Security"
+        index="13 — Security"
         title="What we broke before you could."
         lede="This contract was reviewed adversarially from four independent angles — economics, state machine, cryptographic access control, and the Uniswap integration. Everything below was found and fixed before deployment. Publishing the failures is more useful than claiming there were none."
       />

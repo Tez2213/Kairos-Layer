@@ -57,7 +57,7 @@ export default function Contracts() {
   return (
     <>
       <PageHeader
-        index="11 — Contracts"
+        index="14 — Contracts"
         title="Addresses, parameters, and how to check them yourself."
         lede="Everything is deployed on Ethereum Sepolia with verified source. Nothing on this page is asserted — each value is read live from the chain, and each address links to its verified code."
       />

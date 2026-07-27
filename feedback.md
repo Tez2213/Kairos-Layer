@@ -127,4 +127,23 @@ pool on Nox. Kept chronologically during development, not backfilled.
     helper is not exported from the SDK. We fell back to retrying `decrypt` in a loop.
     Exposing a supported readiness check in `@iexec-nox/handle` would remove the guesswork.
 
+23. **BUG: `@iexec-nox/handle` pulls in `ethers` even for viem-only consumers.**
+    `ethers` is declared optional in `peerDependenciesMeta`, but the package entry
+    statically re-exports `createHandleClient` and `createEthersHandleClient`, both of
+    which statically import `EthersBlockchainService.js` → `import … from "ethers"`.
+    A bundler tree-shakes this away (our Next.js app builds and runs fine without
+    ethers installed), but a plain Node ESM consumer — a keeper bot, a script, a
+    serverless function — crashes on startup with `ERR_MODULE_NOT_FOUND: ethers`
+    even when it only ever calls `createViemHandleClient`. Workaround: install
+    `ethers` you never use. Suggested fix: load the adapters lazily inside the
+    factories (`await import(...)`), or publish separate `@iexec-nox/handle/viem`
+    and `/ethers` entry points.
+24. **Handle-status and history endpoints assume an archive-capable RPC.** Building a
+    "prove no plaintext ever leaked" audit over the protocol's own event history meant
+    calling `eth_getLogs` across the full deployment range. Free Sepolia endpoints vary
+    wildly — one refuses archive queries without a paid token, another caps the span at
+    50 blocks, only a third serves it. Not an iExec issue as such, but any Nox app that
+    wants to *show* users its handle history will hit it, so a documented recommendation
+    (or a subgraph query for handle events) would save teams the discovery.
+
 *(log continues as development proceeds)*

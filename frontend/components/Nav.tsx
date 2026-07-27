@@ -16,12 +16,15 @@ export const PAGES = [
   { n: "07", href: "/balances", label: "Your balances", group: "Use" },
   { n: "08", href: "/epochs", label: "Epochs", group: "Observe" },
   { n: "09", href: "/settle", label: "Settlement desk", group: "Observe" },
-  { n: "10", href: "/security", label: "Security", group: "Reference" },
-  { n: "11", href: "/contracts", label: "Contracts", group: "Reference" },
-  { n: "12", href: "/faq", label: "FAQ", group: "Reference" },
+  { n: "10", href: "/proof", label: "Proof of no leakage", group: "Verify" },
+  { n: "11", href: "/analytics", label: "Execution analytics", group: "Verify" },
+  { n: "12", href: "/auditor", label: "Compliance", group: "Verify" },
+  { n: "13", href: "/security", label: "Security", group: "Reference" },
+  { n: "14", href: "/contracts", label: "Contracts", group: "Reference" },
+  { n: "15", href: "/faq", label: "FAQ", group: "Reference" },
 ];
 
-const GROUPS = ["Understand", "Use", "Observe", "Reference"] as const;
+const GROUPS = ["Understand", "Use", "Observe", "Verify", "Reference"] as const;
 
 export function Nav() {
   const pathname = usePathname();

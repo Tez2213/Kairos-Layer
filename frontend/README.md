@@ -51,8 +51,11 @@ Contract addresses and ABIs live in `lib/generated.ts`, produced from
 | 08 | `/epochs` | Every batch, with crossed-vs-routed proportions |
 | 09 | `/epochs/[id]` | One batch in full detail, including the raw storage record |
 | 10 | `/settle` | Run the permissionless crank yourself, step by step |
-| 11 | `/security` | Audit findings, invariants, liveness guarantees |
-| 12 | `/contracts` · `/faq` | Live parameters and addresses; the awkward questions answered |
+| 11 | `/proof` | **Zero-leakage audit** — replays every event and order transaction and proves no per-user amount was ever published |
+| 12 | `/analytics` | **Execution analytics** — what netting saved in fees and price impact, versus executing the same orders individually |
+| 13 | `/auditor` | **Compliance & disclosure** — scoped, forward-only auditor access for a regulated deployment |
+| 14 | `/security` | Audit findings, invariants, liveness guarantees |
+| 15 | `/contracts` · `/faq` | Live parameters and addresses; the awkward questions answered |
 
 ## Design notes
 

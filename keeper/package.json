@@ -1,0 +1,17 @@
+{
+  "name": "kairos-keeper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Permissionless settlement keeper for Kairos Layer",
+  "scripts": {
+    "start": "node keeper.mjs",
+    "once": "node keeper.mjs --once",
+    "dry": "node keeper.mjs --dry-run --once"
+  },
+  "dependencies": {
+    "@iexec-nox/handle": "0.1.0-beta.13",
+    "ethers": "^6.17.0",
+    "viem": "^2.55.10"
+  }
+}

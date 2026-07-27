@@ -19,7 +19,7 @@ export default function FAQ() {
   return (
     <>
       <PageHeader
-        index="12 — FAQ"
+        index="15 — FAQ"
         title="The questions people actually ask."
         lede="Short answers, including to the awkward ones. If something here contradicts a claim elsewhere on the site, trust this page — it is the one written to be picked apart."
       />
