@@ -39,6 +39,13 @@ export const publicClient = createPublicClient({
     RPC_URLS.map((url) => http(url, { timeout: 15_000, retryCount: 1 })),
     { rank: false },
   ),
+  /**
+   * Collapse the many small reads each page makes into single Multicall3
+   * requests (Sepolia: 0xcA11…CA11). Without this the overview page alone issues
+   * ~19 requests per refresh, which is enough to get rate-limited on a free
+   * public endpoint once a few people are watching at once.
+   */
+  batch: { multicall: { wait: 40, batchSize: 2048 } },
 });
 
 export const A = {

@@ -15,9 +15,12 @@ endpoints and the contract addresses are compiled into `lib/generated.ts`.
 
 ## Deploying (Vercel)
 
-Import the repo, set the root directory to `frontend`, and deploy. Nothing else is
-needed. For a public demo, however, a dedicated RPC endpoint is worth setting so a
-rate-limited public node cannot degrade the app:
+Import the repo, set the root directory to `frontend`, and deploy. **Nothing else is
+needed.** Reads are batched through Multicall3 — a page refresh costs about four
+upstream requests — and spread across several public endpoints with automatic
+failover, so the free nodes are comfortable.
+
+The variables below are optional, for heavy traffic or a guaranteed SLA:
 
 | Variable | Where | Notes |
 | --- | --- | --- |
