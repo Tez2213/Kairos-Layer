@@ -1,57 +1,81 @@
-# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
+# Kairos Layer — Contracts
 
-This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+Confidential dark pool on iExec Nox, settling residuals on Uniswap V3. See the root
+`AGENTS.md` for the full architecture and threat model.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Contracts
 
-## Project Overview
+| Contract | Purpose |
+| --- | --- |
+| `KairosPool.sol` | The dark pool: encrypted orders, epoch state machine, netting, residual swap, pull-claims |
+| `tokens/KairosWrappedToken.sol` | Concrete ERC-20 → ERC-7984 wrapper (deployed as cUSDC and cWETH) |
+| `tokens/TestUSDC.sol` | 6-decimal faucet quote token (Sepolia) |
+| `tokens/TestWETH.sol` | Local-test WETH stand-in (Sepolia uses canonical WETH9) |
+| `test/UniswapSeeder.sol` | Mint-callback helper to seed V3 liquidity (test/deploy only) |
+| `interfaces/IUniswapV3.sol` | Minimal V3 pool interface (no router on Sepolia — direct pool swaps) |
 
-This example project includes:
+## Prerequisites
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+- Node 22+, Docker running (local Nox TEE stack for tests)
+- solc 0.8.35 (pulled automatically; `@iexec-nox/nox-protocol-contracts` requires `^0.8.35`)
 
-## Usage
+## Test
 
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+```bash
+npm test        # boots the local Nox stack (ingestor/runner/gateway/KMS) in Docker
 ```
 
-You can also selectively run the Solidity or `node:test` tests:
+All encrypted operations in tests are REAL TEE operations — no mocks. First run
+downloads Docker images. Test transactions go through the plugin's `nox.connect()`
+connection; anything sent on the default in-process network is invisible to the stack.
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
+## Deploy to Sepolia
+
+Secrets — pick ONE of the two options:
+
+```bash
+# Option A (simplest): fill in the gitignored .env file
+#   SEPOLIA_RPC_URL=…  SEPOLIA_PRIVATE_KEY=…  ETHERSCAN_API_KEY=…
+cp .env.example .env   # then edit .env
+
+# Option B (encrypted keystore, more secure)
+npx hardhat keystore set SEPOLIA_RPC_URL
+npx hardhat keystore set SEPOLIA_PRIVATE_KEY   # burner key, funded with ~0.3 Sepolia ETH
+npx hardhat keystore set ETHERSCAN_API_KEY
+
+npx hardhat run scripts/deploy-sepolia.ts --network sepolia
 ```
 
-### Make a deployment to Sepolia
+The deployer key must be a **burner wallet** with ~0.3 Sepolia ETH (gas + the 0.2 WETH
+liquidity seed).
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+The script is idempotent (re-run safe): deploys TestUSDC, cUSDC/cWETH wrappers and
+KairosPool, creates + initializes + seeds the tUSDC/WETH9 0.3% pool on the canonical
+Uniswap V3 factory only if missing, and records every address in `deployments.json`
+(the single source of truth consumed by the frontend and keeper).
 
-To run the deployment to a local chain:
+Verify each contract afterwards:
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```bash
+npx hardhat verify --network sepolia <address> <constructor args…>
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+## Epoch lifecycle (crank order)
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+`submitOrder*` → `seal()` → `reveal(proofs)` → `initiateSettlement()` →
+`finalizeSettlement(unwrapProof)` → `claim()`
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+Decryption proofs come from the Nox SDK (`publicDecrypt`) and are verified on-chain.
+Every crank is permissionless. Liveness escapes: `cancelEpoch` (reveal timeout, full
+refunds), `recoverEpoch` (unwrap finalized externally, full refunds), `abandonEpoch`
+(TEE never decrypts the unwrap — internal cross only, heavy side absorbs the burned
+residual pro-rata). Settlements are serialized: one epoch in `UnwrapPending` at a time.
 
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
+## Security notes (honest limitations)
 
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+- Internal crossing prices off Uniswap **spot** (`slot0`) — flash-manipulable on
+  mainnet; a TWAP oracle is the production upgrade. Fine for Sepolia demo.
+- Order **direction and participation are public metadata**; only amounts are hidden.
+- k-anonymity degrades in small epochs — the frontend warns below a threshold.
+- Wrap/unwrap amounts at the wrapper boundary are public by nature; privacy applies
+  inside the confidential domain.

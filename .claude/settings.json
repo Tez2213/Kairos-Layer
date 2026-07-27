@@ -22,7 +22,9 @@
       "Bash(docker system *)",
       "Bash(docker container *)",
       "Bash(docker volume *)",
-      "Bash(npm cache *)"
+      "Bash(npm cache *)",
+      "Bash(python3 -c ' *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

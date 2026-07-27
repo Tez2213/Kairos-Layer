@@ -335,6 +335,12 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     function initiateSettlement(uint256 epochId) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.Revealed);
+        // AUDIT: settlements are serialized. With two epochs in UnwrapPending, the
+        // plaintext-balance check in recoverEpoch could not attribute unwrapped
+        // tokens to an epoch (wrapper finalization is permissionless), allowing one
+        // epoch's recovery to consume another's residual. Revealed epochs queue here
+        // until the pending one finalizes, recovers, or is abandoned.
+        if (pendingUnwraps != 0) revert Kairos_PendingUnwraps();
 
         uint256 priceX96 = _priceX96();
         uint256 sellQuoteValue = _baseToQuote(e.sellTotal, priceX96);
@@ -406,10 +412,18 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         bool buyHeavy = e.residual == Residual.BuyHeavy;
         IERC20ToERC7984Wrapper wrapperIn = buyHeavy ? cQuote : cBase;
         IERC20ToERC7984Wrapper wrapperOut = buyHeavy ? cBase : cQuote;
+        IERC20 tokenIn = buyHeavy ? quoteToken : baseToken;
         IERC20 tokenOut = buyHeavy ? baseToken : quoteToken;
 
         // Releases exactly `residualIn` of the public ERC-20 to this contract.
-        wrapperIn.finalizeUnwrap(e.unwrapRequestId, unwrapProof);
+        // AUDIT: the wrapper's finalizeUnwrap is permissionless, so a third party may
+        // already have finalized it directly; in that case the call reverts but the
+        // tokens are here — verify by balance (sound because settlements serialize).
+        try wrapperIn.finalizeUnwrap(e.unwrapRequestId, unwrapProof) {} catch {
+            if (tokenIn.balanceOf(address(this)) < e.residualIn) {
+                revert Kairos_UnwrapNotFinalized();
+            }
+        }
 
         // Sandwich guard: minOut derived from spot read in this same transaction.
         uint256 priceX96 = _priceX96();
@@ -529,6 +543,34 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         emit EpochCancelled(epochId);
     }
 
+    /**
+     * @notice Last-resort escape for the catastrophic case where the TEE never
+     * produces the unwrap decryption (residual is burned at the wrapper and cannot
+     * be released). Settles the epoch on its INTERNAL cross only, as if the residual
+     * swap had yielded zero: the matched volume distributes normally from funds the
+     * pool still holds, and ONLY the heavy side absorbs the burned residual,
+     * pro-rata. No other epoch's funds are touched.
+     *
+     * If the wrapper unwrap somehow finalizes after abandonment, the plaintext
+     * arrives here as unattributed balance recoverable via sweepDust (owner) for a
+     * manual make-whole.
+     */
+    function abandonEpoch(uint256 epochId) external nonReentrant {
+        Epoch storage e = _epochs[epochId];
+        _requireState(epochId, e, EpochState.UnwrapPending);
+        if (block.timestamp < uint256(e.sealedAt) + 4 * uint256(revealTimeout)) {
+            revert Kairos_TimeoutNotReached();
+        }
+        if (e.residual == Residual.BuyHeavy) {
+            e.buyOutTotal = e.sellTotal; // internal cross only; residual quote is lost
+        } else {
+            e.sellOutTotal = e.buyTotal; // internal cross only; residual base is lost
+        }
+        e.state = EpochState.Distributable;
+        pendingUnwraps--;
+        emit EpochDistributable(epochId, e.buyOutTotal, e.sellOutTotal);
+    }
+
     // ============ Uniswap V3 callback ============
 
     /// @inheritdoc IUniswapV3SwapCallback
@@ -598,10 +640,13 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         uint64 revealTimeout_,
         uint16 maxSlippageBps_
     ) private {
+        // Slippage floor: below the Uniswap fee tier (30 bps) + minimal impact, the
+        // residual swap could never satisfy minOut and every settlement would wedge.
         if (
             epochDuration_ < 1 minutes ||
             epochDuration_ > 1 days ||
             revealTimeout_ < 10 minutes ||
+            maxSlippageBps_ < 50 ||
             maxSlippageBps_ > 1_000
         ) revert Kairos_InvalidParam();
         epochDuration = epochDuration_;
