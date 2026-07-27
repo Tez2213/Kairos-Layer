@@ -46,12 +46,34 @@ const SEAL_EMPTY_AFTER_S = Number(process.env.KEEPER_SEAL_EMPTY_AFTER_S ?? 1800)
 // ---------- config ----------
 
 const root = new URL("../contracts/", import.meta.url);
-const env = Object.fromEntries(
-  readFileSync(new URL(".env", root), "utf8")
-    .split("\n")
-    .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
-    .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]),
-);
+
+const parseEnv = (url) => {
+  try {
+    return Object.fromEntries(
+      readFileSync(url, "utf8")
+        .split("\n")
+        .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
+        .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]),
+    );
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Prefer the keeper's own .env, then process env (CI), then the contracts .env
+ * as a local-development convenience. Production should always give the keeper
+ * its own key — see the owner check below.
+ */
+const env = {
+  ...parseEnv(new URL(".env", root)),
+  ...parseEnv(new URL("./.env", import.meta.url)),
+  ...Object.fromEntries(
+    ["KEEPER_PRIVATE_KEY", "SEPOLIA_RPC_URL"]
+      .filter((k) => process.env[k])
+      .map((k) => [k, process.env[k]]),
+  ),
+};
 const D = JSON.parse(readFileSync(new URL("deployments.json", root), "utf8"));
 const POOL_ABI = JSON.parse(
   readFileSync(new URL("artifacts/contracts/KairosPool.sol/KairosPool.json", root), "utf8"),
@@ -222,6 +244,18 @@ console.log("Kairos keeper");
 console.log(`  pool     ${D.KairosPool}`);
 console.log(`  keeper   ${account.address}`);
 console.log(`  mode     ${DRY ? "dry-run" : "live"}${ONCE ? " (single pass)" : ""}\n`);
+
+// The keeper needs no privilege at all. Running it as the contract owner means a
+// leaked CI secret would also hand over setEpochParams / setAuditor / sweepDust.
+try {
+  const owner = await read("owner");
+  if (owner.toLowerCase() === account.address.toLowerCase()) {
+    warn("keeper is running as the CONTRACT OWNER — use a separate burner key in production");
+    warn("  a leaked owner key can change protocol parameters; a keeper key can only pay gas");
+  }
+} catch {
+  /* non-fatal */
+}
 
 if (ONCE) {
   await tick();
