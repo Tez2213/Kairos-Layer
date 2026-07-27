@@ -59,16 +59,24 @@ Components (planned monorepo layout):
 ### 4.1 Epoch state machine (the heart of the system — settlement is ASYNC, multi-tx)
 
 ```
-OPEN ──seal()──▶ SEALED ──requestReveal()──▶ REVEAL_PENDING ──(TEE decrypt)──▶ REVEALED
-                                                                                │ computeNetting() (plaintext, on-chain)
-        ┌──────────────────────────────────────────────────────────────────────┘
-        ▼
-  residual == 0 ──────────────────────────────▶ SETTLED_INTERNAL ─┐
-  residual > 0 ──swapResidual()──▶ SWAPPED ───────────────────────┴──▶ DISTRIBUTABLE ──claim(user)*──▶ (per-user) CLAIMED
-        │ swap fails / reveal times out
-        ▼
-  CANCELLED ──refund(user)*──▶ refunds via confidential transfer
+OPEN ──seal()──▶ SEALED ──reveal(proofs)──▶ REVEALED ──initiateSettlement()──┐
+  │                 │                          │                             │
+  │                 └──────────┬───────────────┘              residual == 0 ─┤
+  │                     cancelEpoch()                                        ▼
+  │                            ▼                              UNWRAP_PENDING │
+  └─emergencyCancelOpenEpoch()─▶ CANCELLED ◀──recoverEpoch()────┤            │
+                                    │                           │ finalizeSettlement(proof,minOut)
+                                    │                           │ abandonEpoch()
+                          claimRefund(user)*                    ▼            ▼
+                                                            DISTRIBUTABLE ◀──┘
+                                                            claim(user)*
 ```
+As implemented (see `contracts/README.md` for the hatch table). Key properties:
+every transition is permissionless and state-guarded; **no state can strand funds**;
+`abandonEpoch` refuses to run when the residual is still recoverable or when the
+write-off would zero a funded side; each epoch **snapshots** its timeouts, slippage
+bound, privacy floor and auditor at open time so owner changes never apply
+retroactively.
 
 Rules:
 - Every transition is **permissionless, idempotent, and guarded by state checks** (`require(state == X)`). The keeper is a convenience, never a trust assumption.
@@ -89,6 +97,28 @@ Rules:
 Uniform price for internal crossing = the **effective execution price of the residual swap** (out/in of the actual Uniswap fill). When residual is 0 (perfect cross), use QuoterV2 midpoint quote posted by the settler, sanity-bounded on-chain vs. pool `slot0` TWAP-ish check. Document this trust bound honestly in README; tighten later with an on-chain TWAP oracle.
 
 ## 5. Edge cases & invariants — CHECK EVERY ONE BEFORE MERGING CONTRACT CODE
+
+### Post-audit invariants added to the implementation (do not regress)
+- **A1 — k-anonymity floor:** `seal()` never publicly decrypts an aggregate for a side
+  with fewer than `minOrders` participants; the epoch cancels for refunds instead. A
+  1-participant "aggregate" IS that user's order.
+- **A2 — per-epoch escrow:** every pending residual is tracked in `escrowedIn[token]`;
+  consumption paths verify the balance covers ALL outstanding escrows, and `sweepDust`
+  can only move `balance − escrowed`. This replaced a global settlement lock that was
+  found to enable a protocol-wide DoS — do not reintroduce serialization.
+- **A3 — TWAP-validated pricing:** the internal cross and the residual swap both
+  require spot within `maxTickDeviation` of the `twapWindow` TWAP. A same-transaction
+  spot read is NOT a slippage guard (it moves with the attacker).
+- **A4 — caller `minOut`:** `finalizeSettlement` takes an off-chain quote that may only
+  tighten the on-chain floor. A hostile cranker can abort, never underfill.
+- **A5 — no destructive write-off:** `abandonEpoch` reverts if the residual is still
+  recoverable, or if the write-off would leave a funded side with a zero payout;
+  `claim` refuses to consume a funded position for a zero payout.
+- **A6 — parameter snapshots:** epochs capture timeouts, slippage, privacy floor and
+  auditor at open time; owner changes never apply retroactively (this also prevents a
+  new auditor from being granted viewer access to historic orders).
+- **A7 — deployability:** the optimizer MUST stay enabled (the contract exceeds the
+  EIP-170 limit without it; local test chains hide this), and `evmVersion` stays pinned.
 
 ### Privacy invariants (non-negotiable)
 - **P1:** Plaintext order amounts must never appear in calldata, events, storage, or logs. Encryption happens **only in the browser** via `encryptInput`. Never implement "Pattern B" (encrypting on-chain from a plaintext arg) anywhere, including tests of the deployed contracts.

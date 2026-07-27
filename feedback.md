@@ -72,4 +72,34 @@ pool on Nox. Kept chronologically during development, not backfilled.
     handle resolution silently stalled. A health check on `hardhat test` startup
     ("storage: low disk space") would have saved a debugging cycle.
 
+15. **BUG: `ViemBlockchainService.getAddress()` ignores the wallet client's bound
+    account.** It returns `walletClient.getAddresses()[0]`
+    (`src/services/blockchain/ViemBlockchainService.ts:64-71`), and for a
+    JSON-RPC-account client (`eth_accounts`) that is the **node's first account**, not
+    the account the client was created with. Since `encryptInput` uses it as the proof
+    `owner` while `signTypedData` correctly prefers `walletClient.account`, the proof
+    is *signed by* account N but *owned by* account 0 — every multi-user flow reverts
+    with an opaque `Owner mismatch`. Note the two code paths disagree with each other
+    inside the same class. Workaround: build clients from **local** accounts
+    (`privateKeyToAccount`) so `getAddresses()` returns the bound account. Suggested
+    fix: `this.walletClient.account?.address ?? (await getAddresses())[0]`.
+    Compounding this, the plugin's `nox` helper is hard-bound to
+    `getWalletClients()[0]` (`utils/handle-client.ts`), so it cannot act as any other
+    user; an optional signer argument would make multi-party tests straightforward.
+16. **Custom errors from NoxCompute don't decode in Hardhat/viem test output.** Failures
+    surface as `reverted with an unrecognized custom error (return data: 0x...)`, and
+    the reason string is only visible by hand-decoding the ABI-encoded tail. Exporting
+    the NoxCompute ABI (or error selectors) from the plugin would make failures
+    self-explanatory.
+17. **`Nox.addViewer` reverts on public handles while `allow`/`allowThis` silently
+    skip them.** `Nox.sol`'s `_allowIfNotPublic` guards the latter, but `addViewer`
+    calls straight through to `ACL.addViewer`, which carries `notPublicHandle`. That
+    asymmetry is a latent trap when adding an auditor/viewer feature to code that
+    also handles public handles; worth a note in the Solidity reference.
+18. **Wanted: a "handle liveness" debug helper.** The single most dangerous mistake in
+    this protocol was forgetting persistent ACL on a handle that must survive to a
+    later transaction. A test-time assertion (e.g. `nox.assertUsableNextTx(handle)`)
+    or a warning when a transaction ends with handles that only ever received
+    transient grants would eliminate an entire bug class.
+
 *(log continues as development proceeds)*

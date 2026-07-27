@@ -1,0 +1,11 @@
+{
+  "chainId": "11155111",
+  "UniswapV3Factory": "0x0227628f3F023bb0B980b67D528571c95c6DaC1c",
+  "TestUSDC": "0xb388c8cdf22bd89f0110620a0b557baa5d9d6ef1",
+  "TestWETH": "0x3003e7d75477c4f6836ec117f6e9c1202e09da84",
+  "cUSDC": "0xaf4230b61c3416db65000b7e6a5f8a3e7568304b",
+  "cWETH": "0x17b1febaa37a45331f9615d28cd7e489fd4f9125",
+  "UniswapV3Pool": "0xd35EA7f04Afc631A5A664Ab2dc9420329615D124",
+  "UniswapSeeder": "0xee97a675867c95b2b20b7f8a6d2b0f80b4307137",
+  "KairosPool": "0xfced18bc0ea5c90b6307f403aa0f21f291b7b7a5"
+}

@@ -24,7 +24,29 @@
       "Bash(docker volume *)",
       "Bash(npm cache *)",
       "Bash(python3 -c ' *)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(node /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/uni.mjs)",
+      "Read(//tmp/**)",
+      "Bash(pip install *)",
+      "Bash(python3 -)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -m 15 -X POST https://ethereum-sepolia-rpc.publicnode.com -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x0227628f3F023bb0B980b67D528571c95c6DaC1c\",\"data\":\"0x22afcccb0000000000000000000000000000000000000000000000000000000000000bb8\"},\"latest\"]}')",
+      "Bash(curl -s -m 15 -X POST https://ethereum-sepolia-rpc.publicnode.com -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x0227628f3F023bb0B980b67D528571c95c6DaC1c\",\"data\":\"0x22afcccb00000000000000000000000000000000000000000000000000000000000001f4\"},\"latest\"]}')",
+      "Bash(curl -s -m 15 -X POST https://ethereum-sepolia-rpc.publicnode.com -H 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"0x0227628f3F023bb0B980b67D528571c95c6DaC1c\",\"latest\"]}')",
+      "Bash(python3 /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/k.py)",
+      "Bash(node /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/uni3.mjs)",
+      "Bash(node /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/tick.mjs)",
+      "Bash(mkdir -p /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad)",
+      "Bash(cat)",
+      "Bash(node /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/verify.mjs)",
+      "Bash(curl -s -X POST https://ethereum-sepolia-rpc.publicnode.com -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBalance\",\"params\":[\"0x3660362BeB3A95CE16D981e7D30E1e025E741393\",\"latest\"]}')",
+      "Bash(curl -s -X POST https://ethereum-sepolia-rpc.publicnode.com -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_gasPrice\",\"params\":[]}')",
+      "Bash(python3 -c \"import json,sys; print\\(f\\\\\"{int\\(json.load\\(sys.stdin\\)['result'],16\\)/1e18:.5f} ETH\\\\\"\\)\")",
+      "Bash(curl -s -X POST https://ethereum-sepolia-rpc.publicnode.com -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getTransactionCount\",\"params\":[\"0x3660362BeB3A95CE16D981e7D30E1e025E741393\",\"latest\"]}')",
+      "Bash(python3 -c \"import json,sys; print\\(int\\(json.load\\(sys.stdin\\)['result'],16\\), 'txs sent'\\)\")",
+      "Bash(cp /tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/smoke.mjs /home/ujwal/Desktop/hackathon/contracts/scripts/smoke-sepolia.mjs)",
+      "Bash(node scripts/smoke-sepolia.mjs)",
+      "Bash(python3 -c \"import json,sys; w=int\\(json.load\\(sys.stdin\\)['result'],16\\); print\\(f'Deployer balance remaining: {w/1e18:.5f} ETH  \\(spent ~{0.024366-w/1e18:.5f}\\)'\\)\")"
     ]
   }
 }

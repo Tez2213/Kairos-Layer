@@ -3,6 +3,7 @@ pragma solidity ^0.8.35;
 
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -23,24 +24,45 @@ import {IUniswapV3PoolMinimal, IUniswapV3SwapCallback} from "./interfaces/IUnisw
  *
  * @notice Users submit swap orders whose AMOUNTS are encrypted end-to-end (Nox handles).
  * Orders are collected into epochs. At settlement, opposite directions are crossed
- * internally at the Uniswap spot price and ONLY the unmatched residual is swapped
- * against the canonical, unmodified Uniswap V3 pool. Individual order sizes are never
- * revealed — only the two epoch aggregates are ever publicly decrypted.
+ * internally at the Uniswap price and ONLY the unmatched residual is swapped against
+ * the canonical, unmodified Uniswap V3 pool. Individual order sizes are never revealed:
+ * only the two epoch aggregates are ever publicly decrypted, and only when enough
+ * participants are present for the aggregate to actually hide them.
  *
  * Directions: BUY  = deposit quote (cUSDC), receive base (cWETH).
  *             SELL = deposit base (cWETH), receive quote (cUSDC).
  *
  * Epoch lifecycle (each transition is permissionless, idempotent, state-guarded):
  *   Open → Sealed → Revealed → UnwrapPending → Distributable
- *                     └────────────┴──(timeout)──→ Cancelled (full refunds)
+ *     └──────┴─────────┴────────────┴──────────→ Cancelled (full refunds)
  * Settlement is asynchronous by design: public decryption of aggregates and the
- * wrapper unwrap both require an off-chain Nox TEE round-trip.
+ * wrapper unwrap each require an off-chain Nox TEE round-trip.
  *
- * KNOWN LIMITATIONS (deliberate, documented for judges):
+ * SECURITY MODEL
+ *  - Price manipulation: both the internal cross and the residual swap require spot
+ *    to sit within `maxTickDeviation` of the pool's `twapWindow` TWAP, so a
+ *    flash-manipulated price cannot set the clearing rate. The residual swap
+ *    additionally takes a caller-supplied `minOut` (off-chain quote) which may only
+ *    TIGHTEN the on-chain floor — a malicious cranker can abort, never underfill.
+ *  - Fund attribution: each epoch's unwrapped residual is tracked in `escrowedIn`,
+ *    and every consumption path proves the balance covers ALL outstanding escrows.
+ *    One epoch can never spend another's custody, and settlements need not serialize.
+ *  - Liveness: no state can strand funds. Open epochs have an emergency cancel,
+ *    Sealed/Revealed have `cancelEpoch`, UnwrapPending has `recoverEpoch` (residual
+ *    released) and `abandonEpoch` (residual permanently lost at the wrapper) — the
+ *    latter can never zero out a funded side's payout.
+ *  - Parameters are SNAPSHOT per epoch at open time, so owner changes can never
+ *    retroactively move an in-flight epoch's deadlines, privacy floor or slippage.
+ *
+ * KNOWN LIMITATIONS (deliberate, documented for reviewers)
  *  - Order DIRECTION and participation are public metadata; only amounts are hidden.
- *  - Internal crossing uses the Uniswap spot price (slot0) at settlement; spot is
- *    flash-manipulable on mainnet — a TWAP oracle is the production upgrade path.
- *  - k-anonymity degrades in small epochs; the frontend warns below a threshold.
+ *  - `buyCount`/`sellCount` are an UPPER BOUND on real participants: an ERC-7984
+ *    transfer that exceeds the sender's balance silently moves 0 but still registers.
+ *    A sybil can therefore inflate the counts that `minOrders` gates on without
+ *    committing capital. Raising the k-anonymity floor mitigates but does not remove
+ *    this; a capital-weighted floor is the production fix.
+ *  - The heavy side absorbs the Uniswap fee and price impact of the residual, while
+ *    the internally-crossed volume clears at the (TWAP-validated) pool price.
  */
 contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
@@ -66,18 +88,27 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
 
     struct Epoch {
         EpochState state;
+        Residual residual;
         uint64 startTime;
         uint64 endTime;
         uint64 sealedAt;
-        uint32 buyCount; // distinct buy participants
-        uint32 sellCount; // distinct sell participants
+        uint64 unwrapRequestedAt;
+        uint32 buyCount; // distinct buy participants (upper bound, see limitations)
+        uint32 sellCount; // distinct sell participants (upper bound)
+        // --- parameters snapshotted at epoch open (immune to later owner changes) ---
+        uint64 revealTimeoutSnap;
+        uint64 unwrapTimeoutSnap;
+        uint32 minOrdersSnap;
+        uint16 maxSlippageBpsSnap;
+        address auditorSnap;
+        // --- encrypted state ---
         euint256 buyTotalEnc; // encrypted sum of actual buy deposits (quote units)
         euint256 sellTotalEnc; // encrypted sum of actual sell deposits (base units)
-        uint256 buyTotal; // plaintext after reveal
-        uint256 sellTotal; // plaintext after reveal
-        Residual residual;
-        uint256 residualIn; // plaintext residual input amount
         euint256 unwrapRequestId; // wrapper unwrap request handle
+        // --- plaintext, only after reveal ---
+        uint256 buyTotal;
+        uint256 sellTotal;
+        uint256 residualIn;
         uint256 buyOutTotal; // base units owed to buyers (final at Distributable)
         uint256 sellOutTotal; // quote units owed to sellers (final at Distributable)
     }
@@ -89,12 +120,17 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     error Kairos_EpochEnded();
     error Kairos_TimeoutNotReached();
     error Kairos_NoOrder();
+    error Kairos_NothingToClaim();
     error Kairos_AlreadyClaimed();
     error Kairos_SlippageExceeded(uint256 got, uint256 minOut);
+    error Kairos_PriceDeviation(int24 spotTick, int24 twapTick);
     error Kairos_UnexpectedCallback();
     error Kairos_UnwrapNotFinalized();
+    error Kairos_UnwrapAlreadyFinalized();
+    error Kairos_InsufficientEscrow();
+    error Kairos_PartialSwap(uint256 consumed, uint256 expected);
+    error Kairos_ZeroPayout();
     error Kairos_InvalidParam();
-    error Kairos_PendingUnwraps();
 
     // ============ Events ============
 
@@ -118,16 +154,24 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     );
     event ResidualSwapped(uint256 indexed epochId, uint256 amountIn, uint256 amountOut);
     event EpochDistributable(uint256 indexed epochId, uint256 buyOutTotal, uint256 sellOutTotal);
-    event EpochCancelled(uint256 indexed epochId);
+    event EpochCancelled(uint256 indexed epochId, string reason);
+    event EpochAbandoned(uint256 indexed epochId, uint256 lostResidual);
     event Claimed(uint256 indexed epochId, address indexed user);
     event RefundClaimed(uint256 indexed epochId, address indexed user);
     event AuditorSet(address auditor);
-    event EpochParamsSet(uint64 epochDuration, uint64 revealTimeout, uint16 maxSlippageBps);
+    event EpochParamsSet(
+        uint64 epochDuration,
+        uint64 revealTimeout,
+        uint64 unwrapTimeout,
+        uint16 maxSlippageBps,
+        uint32 minOrders
+    );
+    event PriceGuardSet(uint32 twapWindow, uint24 maxTickDeviation);
 
     // ============ Immutables ============
 
     IERC20 public immutable quoteToken; // e.g. tUSDC (public ERC-20)
-    IERC20 public immutable baseToken; // e.g. WETH9 (public ERC-20)
+    IERC20 public immutable baseToken; // e.g. WETH (public ERC-20)
     IERC20ToERC7984Wrapper public immutable cQuote; // confidential wrapper of quoteToken
     IERC20ToERC7984Wrapper public immutable cBase; // confidential wrapper of baseToken
     IUniswapV3PoolMinimal public immutable uniPool;
@@ -141,8 +185,12 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     // ============ Storage ============
 
     uint64 public epochDuration;
-    uint64 public revealTimeout;
+    uint64 public revealTimeout; // Sealed/Revealed → cancellable after this
+    uint64 public unwrapTimeout; // UnwrapPending → recoverable after this (3x → abandon)
     uint16 public maxSlippageBps;
+    uint32 public minOrders; // per-side k-anonymity floor for revealing an aggregate
+    uint32 public twapWindow; // seconds; 0 disables the price-deviation guard
+    uint24 public maxTickDeviation; // allowed |spot - twap| in ticks (~1 tick = 1 bp)
     address public auditor; // optional selective-disclosure viewer
 
     uint256 public currentEpochId;
@@ -151,8 +199,10 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     mapping(uint256 epochId => mapping(address user => euint256)) private _sellOrders;
     mapping(uint256 epochId => mapping(address user => bool)) public claimed;
 
-    /// @dev Number of epochs stuck in UnwrapPending — guards owner dust sweeps.
-    uint256 public pendingUnwraps;
+    /// @notice Plaintext ERC-20 owed to epochs whose residual was unwrapped but not yet
+    /// consumed. Guarantees per-epoch attribution and bounds `sweepDust`.
+    mapping(address token => uint256) public escrowedIn;
+
     /// @dev Reentrancy-style guard: only accept the Uniswap callback we initiated.
     bool private _inSwap;
 
@@ -164,7 +214,9 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         IUniswapV3PoolMinimal uniPool_,
         uint64 epochDuration_,
         uint64 revealTimeout_,
+        uint64 unwrapTimeout_,
         uint16 maxSlippageBps_,
+        uint32 minOrders_,
         address owner_
     ) Ownable(owner_) {
         cQuote = cQuote_;
@@ -180,7 +232,18 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         if (!quoteIs0 && !quoteIs1) revert Kairos_InvalidParam();
         quoteIsToken0 = quoteIs0;
 
-        _setEpochParams(epochDuration_, revealTimeout_, maxSlippageBps_);
+        // An uninitialized pool has sqrtPriceX96 == 0, which would make every price
+        // conversion divide by zero. Fail at deploy time, not at settlement time.
+        (uint160 sqrtPriceX96, , , , , , ) = uniPool_.slot0();
+        if (sqrtPriceX96 == 0) revert Kairos_InvalidParam();
+
+        _setEpochParams(
+            epochDuration_,
+            revealTimeout_,
+            unwrapTimeout_,
+            maxSlippageBps_,
+            minOrders_
+        );
         _openNextEpoch();
     }
 
@@ -222,7 +285,7 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         // Persist access: pool reuses the handle at claim time, user can decrypt it.
         Nox.allowThis(newOrder);
         Nox.allow(newOrder, msg.sender);
-        if (auditor != address(0)) Nox.addViewer(newOrder, auditor);
+        if (e.auditorSnap != address(0)) Nox.addViewer(newOrder, e.auditorSnap);
         orders[msg.sender] = newOrder;
 
         if (isBuy) {
@@ -237,12 +300,16 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         emit OrderSubmitted(epochId, msg.sender, isBuy);
     }
 
-    /// @notice Cancel an order while the epoch is still open; funds return confidentially.
+    /**
+     * @notice Cancel an order before the epoch is sealed; funds return confidentially.
+     * @dev Deliberately allowed in the window between `endTime` and `seal()`: the
+     * aggregate is not yet publicly decryptable, so this leaks nothing, and it keeps
+     * deposits withdrawable if nobody cranks `seal()`.
+     */
     function cancelOrder(bool isBuy) external nonReentrant {
         uint256 epochId = currentEpochId;
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.Open);
-        if (block.timestamp >= e.endTime) revert Kairos_EpochEnded();
 
         mapping(address => euint256) storage orders = isBuy
             ? _buyOrders[epochId]
@@ -271,8 +338,13 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
 
     /**
      * @notice Seal the current epoch once its window elapsed and open the next one.
-     * Marks ONLY the two aggregate handles publicly decryptable — this is the single
-     * deliberate disclosure in the protocol; individual order handles never get it.
+     * Marks ONLY the two aggregate handles publicly decryptable — the single
+     * deliberate disclosure in the protocol.
+     *
+     * @dev PRIVACY GUARD: a side with fewer than `minOrders` participants would have
+     * an "aggregate" that reveals (or trivially unmasks) an individual order, so the
+     * epoch is cancelled for full refunds instead of being revealed. Refusing to
+     * settle is always preferable to silently breaking the privacy guarantee.
      */
     function seal() external nonReentrant {
         uint256 epochId = currentEpochId;
@@ -285,18 +357,24 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
             // Empty epoch: nothing to reveal or settle.
             e.state = EpochState.Distributable;
             emit EpochDistributable(epochId, 0, 0);
+        } else if (
+            (e.buyCount > 0 && e.buyCount < e.minOrdersSnap) ||
+            (e.sellCount > 0 && e.sellCount < e.minOrdersSnap)
+        ) {
+            e.state = EpochState.Cancelled;
+            emit EpochCancelled(epochId, "insufficient participants for privacy");
         } else {
             e.state = EpochState.Sealed;
             if (e.buyCount > 0) Nox.allowPublicDecryption(e.buyTotalEnc);
             if (e.sellCount > 0) Nox.allowPublicDecryption(e.sellTotalEnc);
+            emit EpochSealed(
+                epochId,
+                euint256.unwrap(e.buyTotalEnc),
+                euint256.unwrap(e.sellTotalEnc),
+                e.buyCount,
+                e.sellCount
+            );
         }
-        emit EpochSealed(
-            epochId,
-            euint256.unwrap(e.buyTotalEnc),
-            euint256.unwrap(e.sellTotalEnc),
-            e.buyCount,
-            e.sellCount
-        );
         _openNextEpoch();
     }
 
@@ -328,20 +406,16 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     }
 
     /**
-     * @notice Cross the two sides at the current Uniswap spot price and, if a residual
+     * @notice Cross the two sides at the (TWAP-validated) pool price and, if a residual
      * remains, start unwrapping it (async TEE step). Perfect crosses settle instantly —
      * matched volume never touches the public chain at all.
      */
     function initiateSettlement(uint256 epochId) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.Revealed);
-        // AUDIT: settlements are serialized. With two epochs in UnwrapPending, the
-        // plaintext-balance check in recoverEpoch could not attribute unwrapped
-        // tokens to an epoch (wrapper finalization is permissionless), allowing one
-        // epoch's recovery to consume another's residual. Revealed epochs queue here
-        // until the pending one finalizes, recovers, or is abandoned.
-        if (pendingUnwraps != 0) revert Kairos_PendingUnwraps();
 
+        // The cross rate must not be settable by a flash loan.
+        _requireSpotNearTwap();
         uint256 priceX96 = _priceX96();
         uint256 sellQuoteValue = _baseToQuote(e.sellTotal, priceX96);
 
@@ -360,6 +434,7 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
             e.residual = Residual.BuyHeavy;
             e.residualIn = residual;
             e.unwrapRequestId = _requestUnwrap(cQuote, residual);
+            escrowedIn[address(quoteToken)] += residual;
             emit SettlementInitiated(
                 epochId,
                 Residual.BuyHeavy,
@@ -370,21 +445,12 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         } else {
             // Sell-heavy: all buyers fill internally.
             uint256 buyBaseValue = _quoteToBase(e.buyTotal, priceX96);
-            // Rounding can nudge the conversion past the other side; clamp to a perfect cross.
-            if (buyBaseValue >= e.sellTotal) {
-                e.residual = Residual.NoResidual;
-                e.buyOutTotal = e.sellTotal;
-                e.sellOutTotal = e.buyTotal;
-                e.state = EpochState.Distributable;
-                emit SettlementInitiated(epochId, Residual.NoResidual, 0, e.buyTotal, 0);
-                emit EpochDistributable(epochId, e.buyOutTotal, e.sellOutTotal);
-                return;
-            }
             e.buyOutTotal = buyBaseValue;
             uint256 residual = e.sellTotal - buyBaseValue;
             e.residual = Residual.SellHeavy;
             e.residualIn = residual;
             e.unwrapRequestId = _requestUnwrap(cBase, residual);
+            escrowedIn[address(baseToken)] += residual;
             emit SettlementInitiated(
                 epochId,
                 Residual.SellHeavy,
@@ -393,21 +459,27 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
                 euint256.unwrap(e.unwrapRequestId)
             );
         }
+        e.unwrapRequestedAt = uint64(block.timestamp);
         e.state = EpochState.UnwrapPending;
-        pendingUnwraps++;
     }
 
     /**
      * @notice Finalize the residual unwrap with its TEE decryption proof, execute the
      * single aggregate swap directly against Uniswap V3, wrap the output back into
      * confidential form, and open claims.
+     *
+     * @param minOut Caller-supplied floor from an off-chain quote (e.g. QuoterV2). It
+     * may only TIGHTEN the on-chain spot-derived floor, so a hostile cranker can abort
+     * the settlement but can never make users accept a worse fill.
      */
     function finalizeSettlement(
         uint256 epochId,
-        bytes calldata unwrapProof
+        bytes calldata unwrapProof,
+        uint256 minOut
     ) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.UnwrapPending);
+        _requireSpotNearTwap();
 
         bool buyHeavy = e.residual == Residual.BuyHeavy;
         IERC20ToERC7984Wrapper wrapperIn = buyHeavy ? cQuote : cBase;
@@ -415,24 +487,20 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         IERC20 tokenIn = buyHeavy ? quoteToken : baseToken;
         IERC20 tokenOut = buyHeavy ? baseToken : quoteToken;
 
-        // Releases exactly `residualIn` of the public ERC-20 to this contract.
-        // AUDIT: the wrapper's finalizeUnwrap is permissionless, so a third party may
-        // already have finalized it directly; in that case the call reverts but the
-        // tokens are here — verify by balance (sound because settlements serialize).
-        try wrapperIn.finalizeUnwrap(e.unwrapRequestId, unwrapProof) {} catch {
-            if (tokenIn.balanceOf(address(this)) < e.residualIn) {
-                revert Kairos_UnwrapNotFinalized();
-            }
-        }
+        _releaseResidual(wrapperIn, tokenIn, e.unwrapRequestId, e.residualIn, unwrapProof);
+        // Consume this epoch's escrow before spending, so a reentrant or racing path
+        // can never double-spend the same residual.
+        escrowedIn[address(tokenIn)] -= e.residualIn;
 
-        // Sandwich guard: minOut derived from spot read in this same transaction.
+        // Floor: spot-derived (TWAP-validated above), tightened by the caller's quote.
         uint256 priceX96 = _priceX96();
         uint256 expectedOut = buyHeavy
             ? _quoteToBase(e.residualIn, priceX96)
             : _baseToQuote(e.residualIn, priceX96);
-        uint256 minOut = (expectedOut * (BPS - maxSlippageBps)) / BPS;
+        uint256 floorOut = (expectedOut * (BPS - e.maxSlippageBpsSnap)) / BPS;
+        if (minOut > floorOut) floorOut = minOut;
 
-        uint256 out = _swapExactInput(buyHeavy, e.residualIn, minOut);
+        uint256 out = _swapExactInput(buyHeavy, e.residualIn, floorOut);
         emit ResidualSwapped(epochId, e.residualIn, out);
 
         // Re-shield the output for confidential pro-rata distribution.
@@ -445,7 +513,6 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
             e.sellOutTotal = e.buyTotal + out;
         }
         e.state = EpochState.Distributable;
-        pendingUnwraps--;
         emit EpochDistributable(epochId, e.buyOutTotal, e.sellOutTotal);
     }
 
@@ -460,7 +527,6 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.Distributable);
         if (claimed[epochId][msg.sender]) revert Kairos_AlreadyClaimed();
-        claimed[epochId][msg.sender] = true;
 
         euint256 buyIn = _buyOrders[epochId][msg.sender];
         euint256 sellIn = _sellOrders[epochId][msg.sender];
@@ -468,11 +534,18 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         bool hasSell = Nox.isInitialized(sellIn);
         if (!hasBuy && !hasSell) revert Kairos_NoOrder();
 
+        // A funded side must never be consumed for a zero payout: refuse the claim so
+        // the position stays claimable if the epoch is later made whole.
+        if (hasBuy && e.buyTotal > 0 && e.buyOutTotal == 0) revert Kairos_ZeroPayout();
+        if (hasSell && e.sellTotal > 0 && e.sellOutTotal == 0) revert Kairos_ZeroPayout();
+
+        claimed[epochId][msg.sender] = true;
+
         if (hasBuy && e.buyTotal > 0) {
-            _payShare(IERC7984(address(cBase)), buyIn, e.buyOutTotal, e.buyTotal);
+            _payShare(IERC7984(address(cBase)), buyIn, e.buyOutTotal, e.buyTotal, e.auditorSnap);
         }
         if (hasSell && e.sellTotal > 0) {
-            _payShare(IERC7984(address(cQuote)), sellIn, e.sellOutTotal, e.sellTotal);
+            _payShare(IERC7984(address(cQuote)), sellIn, e.sellOutTotal, e.sellTotal, e.auditorSnap);
         }
         emit Claimed(epochId, msg.sender);
     }
@@ -504,71 +577,110 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     // ============ Liveness escape hatches ============
 
     /**
-     * @notice Cancel a wedged epoch before any funds were burned (reveal never arrived).
-     * Every deposit remains in confidential custody → full refunds via claimRefund.
+     * @notice Cancel a wedged epoch before any funds were burned (reveal never arrived,
+     * or settlement never cranked). Deposits remain in confidential custody → full
+     * refunds via claimRefund.
      */
     function cancelEpoch(uint256 epochId) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         if (e.state != EpochState.Sealed && e.state != EpochState.Revealed) {
             revert Kairos_WrongState(epochId, e.state);
         }
-        if (block.timestamp < uint256(e.sealedAt) + revealTimeout) {
+        if (block.timestamp < uint256(e.sealedAt) + e.revealTimeoutSnap) {
             revert Kairos_TimeoutNotReached();
         }
         e.state = EpochState.Cancelled;
-        emit EpochCancelled(epochId);
+        emit EpochCancelled(epochId, "reveal/settlement timeout");
     }
 
     /**
-     * @notice Recover a wedged UnwrapPending epoch. Requires the wrapper unwrap to have
-     * been finalized (permissionless on the wrapper itself) so the residual ERC-20 sits
-     * in this contract; it is re-wrapped 1:1, restoring full confidential custody,
-     * then the epoch cancels with refunds.
+     * @notice Rescue an epoch whose residual WAS released by the wrapper but whose swap
+     * never completed (e.g. slippage bound unreachable). The plaintext residual is
+     * re-wrapped 1:1, restoring full confidential custody, then the epoch cancels with
+     * refunds.
      */
     function recoverEpoch(uint256 epochId) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.UnwrapPending);
-        if (block.timestamp < uint256(e.sealedAt) + 2 * uint256(revealTimeout)) {
+        if (block.timestamp < uint256(e.unwrapRequestedAt) + e.unwrapTimeoutSnap) {
             revert Kairos_TimeoutNotReached();
         }
         bool buyHeavy = e.residual == Residual.BuyHeavy;
         IERC20 tokenIn = buyHeavy ? quoteToken : baseToken;
         IERC20ToERC7984Wrapper wrapperIn = buyHeavy ? cQuote : cBase;
-        if (tokenIn.balanceOf(address(this)) < e.residualIn) revert Kairos_UnwrapNotFinalized();
+
+        // Only valid once this epoch's own request has been finalized (permissionlessly
+        // callable on the wrapper) and the balance covers every outstanding escrow.
+        if (wrapperIn.unwrapRequester(e.unwrapRequestId) != address(0)) {
+            revert Kairos_UnwrapNotFinalized();
+        }
+        if (tokenIn.balanceOf(address(this)) < escrowedIn[address(tokenIn)]) {
+            revert Kairos_InsufficientEscrow();
+        }
+        escrowedIn[address(tokenIn)] -= e.residualIn;
 
         tokenIn.forceApprove(address(wrapperIn), e.residualIn);
         wrapperIn.wrap(address(this), e.residualIn);
         e.state = EpochState.Cancelled;
-        pendingUnwraps--;
-        emit EpochCancelled(epochId);
+        emit EpochCancelled(epochId, "residual recovered, refunds open");
     }
 
     /**
-     * @notice Last-resort escape for the catastrophic case where the TEE never
-     * produces the unwrap decryption (residual is burned at the wrapper and cannot
-     * be released). Settles the epoch on its INTERNAL cross only, as if the residual
-     * swap had yielded zero: the matched volume distributes normally from funds the
-     * pool still holds, and ONLY the heavy side absorbs the burned residual,
-     * pro-rata. No other epoch's funds are touched.
+     * @notice Last-resort escape for the catastrophic case where the TEE never produces
+     * the unwrap decryption: the residual is burned at the wrapper and can never be
+     * released. Settles the epoch on its INTERNAL cross only — the matched volume
+     * distributes normally from funds the pool still holds, and only the heavy side
+     * absorbs the lost residual, pro-rata.
      *
-     * If the wrapper unwrap somehow finalizes after abandonment, the plaintext
-     * arrives here as unattributed balance recoverable via sweepDust (owner) for a
-     * manual make-whole.
+     * @dev Guarded so it can never destroy value that is actually recoverable:
+     *  - reverts if the unwrap HAS been finalized (use `recoverEpoch` — full refunds);
+     *  - reverts if the write-off would leave a funded side with a zero payout (a
+     *    one-sided epoch), because leaving it in UnwrapPending keeps it rescuable
+     *    forever should the TEE recover, which strictly dominates writing it off.
      */
     function abandonEpoch(uint256 epochId) external nonReentrant {
         Epoch storage e = _epochs[epochId];
         _requireState(epochId, e, EpochState.UnwrapPending);
-        if (block.timestamp < uint256(e.sealedAt) + 4 * uint256(revealTimeout)) {
+        if (block.timestamp < uint256(e.unwrapRequestedAt) + 3 * uint256(e.unwrapTimeoutSnap)) {
             revert Kairos_TimeoutNotReached();
         }
-        if (e.residual == Residual.BuyHeavy) {
+        bool buyHeavy = e.residual == Residual.BuyHeavy;
+        IERC20ToERC7984Wrapper wrapperIn = buyHeavy ? cQuote : cBase;
+        if (wrapperIn.unwrapRequester(e.unwrapRequestId) == address(0)) {
+            revert Kairos_UnwrapAlreadyFinalized();
+        }
+        if (buyHeavy) {
+            if (e.sellTotal == 0) revert Kairos_ZeroPayout();
             e.buyOutTotal = e.sellTotal; // internal cross only; residual quote is lost
         } else {
+            if (e.buyTotal == 0) revert Kairos_ZeroPayout();
             e.sellOutTotal = e.buyTotal; // internal cross only; residual base is lost
         }
+        // The residual will never arrive: drop its escrow claim.
+        IERC20 tokenIn = buyHeavy ? quoteToken : baseToken;
+        escrowedIn[address(tokenIn)] -= e.residualIn;
+
         e.state = EpochState.Distributable;
-        pendingUnwraps--;
+        emit EpochAbandoned(epochId, e.residualIn);
         emit EpochDistributable(epochId, e.buyOutTotal, e.sellOutTotal);
+    }
+
+    /**
+     * @notice Break-glass for a dead `seal()` (e.g. Nox unavailable): after the epoch
+     * window plus a full reveal timeout, anyone may cancel the open epoch for refunds
+     * and open a fresh one. Without this, a failing `seal()` would strand deposits and
+     * halt the protocol permanently, since new epochs open only inside `seal()`.
+     */
+    function emergencyCancelOpenEpoch() external nonReentrant {
+        uint256 epochId = currentEpochId;
+        Epoch storage e = _epochs[epochId];
+        _requireState(epochId, e, EpochState.Open);
+        if (block.timestamp < uint256(e.endTime) + e.revealTimeoutSnap) {
+            revert Kairos_TimeoutNotReached();
+        }
+        e.state = EpochState.Cancelled;
+        emit EpochCancelled(epochId, "seal unavailable");
+        _openNextEpoch();
     }
 
     // ============ Uniswap V3 callback ============
@@ -605,10 +717,21 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         return isBuy ? _buyOrders[epochId][user] : _sellOrders[epochId][user];
     }
 
+    /// @notice Plaintext ERC-20 not spoken for by any pending epoch residual.
+    function sweepableDust(IERC20 token) public view returns (uint256) {
+        uint256 balance = token.balanceOf(address(this));
+        uint256 escrowed = escrowedIn[address(token)];
+        return balance > escrowed ? balance - escrowed : 0;
+    }
+
     // ============ Admin ============
 
-    /// @notice Auditor gets read access (viewer) to per-user order handles — selective
-    /// disclosure for compliance without anything becoming public. Applies to new orders.
+    /// @notice Auditor gets read access (viewer) to order and payout handles —
+    /// selective disclosure for compliance without anything becoming public. Applies
+    /// only to epochs opened AFTER this call: each epoch snapshots the auditor, so a
+    /// newly appointed auditor can never see historic orders.
+    /// @dev The Nox ACL has no `removeViewer`: viewer grants are PERMANENT. Point this
+    /// at a proxy contract if you need key rotation.
     function setAuditor(address auditor_) external onlyOwner {
         auditor = auditor_;
         emit AuditorSet(auditor_);
@@ -617,16 +740,33 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     function setEpochParams(
         uint64 epochDuration_,
         uint64 revealTimeout_,
-        uint16 maxSlippageBps_
+        uint64 unwrapTimeout_,
+        uint16 maxSlippageBps_,
+        uint32 minOrders_
     ) external onlyOwner {
-        _setEpochParams(epochDuration_, revealTimeout_, maxSlippageBps_);
+        _setEpochParams(
+            epochDuration_,
+            revealTimeout_,
+            unwrapTimeout_,
+            maxSlippageBps_,
+            minOrders_
+        );
     }
 
-    /// @notice Rescue plaintext ERC-20 dust (rounding remainders). Blocked while any
-    /// epoch awaits its unwrap so in-flight residuals can never be swept.
+    /// @notice Configure the spot-vs-TWAP deviation guard. `twapWindow_ == 0` disables
+    /// it — only acceptable on a pool without observation history, and it re-exposes
+    /// settlement to price manipulation.
+    function setPriceGuard(uint32 twapWindow_, uint24 maxTickDeviation_) external onlyOwner {
+        if (twapWindow_ > 1 days || maxTickDeviation_ > 10_000) revert Kairos_InvalidParam();
+        twapWindow = twapWindow_;
+        maxTickDeviation = maxTickDeviation_;
+        emit PriceGuardSet(twapWindow_, maxTickDeviation_);
+    }
+
+    /// @notice Rescue plaintext ERC-20 dust (rounding remainders, donations, residuals
+    /// stranded by an abandoned epoch). Can never touch escrowed residuals.
     function sweepDust(IERC20 token, address to) external onlyOwner {
-        if (pendingUnwraps != 0) revert Kairos_PendingUnwraps();
-        token.safeTransfer(to, token.balanceOf(address(this)));
+        token.safeTransfer(to, sweepableDust(token));
     }
 
     // ============ Internals ============
@@ -638,21 +778,38 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
     function _setEpochParams(
         uint64 epochDuration_,
         uint64 revealTimeout_,
-        uint16 maxSlippageBps_
+        uint64 unwrapTimeout_,
+        uint16 maxSlippageBps_,
+        uint32 minOrders_
     ) private {
-        // Slippage floor: below the Uniswap fee tier (30 bps) + minimal impact, the
-        // residual swap could never satisfy minOut and every settlement would wedge.
+        // Slippage floor: below the Uniswap fee tier (30 bps) plus minimal impact, the
+        // residual swap could never satisfy its floor and every settlement would wedge.
+        // Timeouts are bounded on BOTH sides so the owner can neither disable the
+        // escape hatches nor force-cancel live epochs.
         if (
             epochDuration_ < 1 minutes ||
             epochDuration_ > 1 days ||
             revealTimeout_ < 10 minutes ||
+            revealTimeout_ > 7 days ||
+            unwrapTimeout_ < 5 minutes ||
+            unwrapTimeout_ > 1 days ||
             maxSlippageBps_ < 50 ||
-            maxSlippageBps_ > 1_000
+            maxSlippageBps_ > 1_000 ||
+            minOrders_ == 0 ||
+            minOrders_ > 100
         ) revert Kairos_InvalidParam();
         epochDuration = epochDuration_;
         revealTimeout = revealTimeout_;
+        unwrapTimeout = unwrapTimeout_;
         maxSlippageBps = maxSlippageBps_;
-        emit EpochParamsSet(epochDuration_, revealTimeout_, maxSlippageBps_);
+        minOrders = minOrders_;
+        emit EpochParamsSet(
+            epochDuration_,
+            revealTimeout_,
+            unwrapTimeout_,
+            maxSlippageBps_,
+            minOrders_
+        );
     }
 
     function _openNextEpoch() private {
@@ -661,6 +818,13 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         e.state = EpochState.Open;
         e.startTime = uint64(block.timestamp);
         e.endTime = uint64(block.timestamp) + epochDuration;
+        // Snapshot every parameter this epoch will be judged by, so later owner
+        // changes cannot retroactively alter its deadlines, privacy floor or slippage.
+        e.revealTimeoutSnap = revealTimeout;
+        e.unwrapTimeoutSnap = unwrapTimeout;
+        e.maxSlippageBpsSnap = maxSlippageBps;
+        e.minOrdersSnap = minOrders;
+        e.auditorSnap = auditor;
         emit EpochOpened(id, e.startTime, e.endTime);
     }
 
@@ -675,29 +839,85 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         return wrapper.unwrap(address(this), address(this), enc);
     }
 
+    /**
+     * @dev Ensures `residualIn` of `tokenIn` is present and attributable to this epoch.
+     * The wrapper's `finalizeUnwrap` is permissionless, so a third party may already
+     * have called it; `unwrapRequester` (deleted by the wrapper on finalize) is the
+     * authoritative discriminator. On the path we drive, the balance delta must equal
+     * the residual exactly — a short burn would otherwise go unnoticed.
+     */
+    function _releaseResidual(
+        IERC20ToERC7984Wrapper wrapper,
+        IERC20 tokenIn,
+        euint256 unwrapRequestId,
+        uint256 residualIn,
+        bytes calldata unwrapProof
+    ) private {
+        if (wrapper.unwrapRequester(unwrapRequestId) != address(0)) {
+            uint256 balanceBefore = tokenIn.balanceOf(address(this));
+            wrapper.finalizeUnwrap(unwrapRequestId, unwrapProof);
+            if (tokenIn.balanceOf(address(this)) - balanceBefore != residualIn) {
+                revert Kairos_UnwrapNotFinalized();
+            }
+        } else if (tokenIn.balanceOf(address(this)) < escrowedIn[address(tokenIn)]) {
+            // Already finalized by someone else: the funds must still be here, and
+            // covering EVERY outstanding escrow proves we are not spending another
+            // epoch's residual.
+            revert Kairos_InsufficientEscrow();
+        }
+    }
+
     /// @dev userOut = userIn * outTotal / inTotal, computed on encrypted operands.
-    /// Mul-before-div for precision; rounding dust accrues to the pool (sweepable).
+    /// Mul-before-div for precision; floor division rounds toward the pool, so the
+    /// last claimer can never be underfunded. Rounding dust is sweepable.
     function _payShare(
         IERC7984 tokenOut,
         euint256 userIn,
         uint256 outTotal,
-        uint256 inTotal
+        uint256 inTotal,
+        address auditor_
     ) private {
-        if (outTotal == 0) return; // dust-residual epochs: nothing to distribute
         euint256 share = Nox.div(
             Nox.mul(userIn, Nox.toEuint256(outTotal)),
             Nox.toEuint256(inTotal)
         );
         Nox.allow(share, msg.sender);
-        if (auditor != address(0)) Nox.addViewer(share, auditor);
+        if (auditor_ != address(0)) Nox.addViewer(share, auditor_);
         Nox.allowTransient(share, address(tokenOut));
         tokenOut.confidentialTransfer(msg.sender, share);
+    }
+
+    /**
+     * @dev Reverts unless the pool's spot price sits within `maxTickDeviation` of its
+     * `twapWindow` TWAP. Ticks are log-space, so comparing them needs no price math:
+     * 1 tick ≈ 1 basis point. This is what makes the spot-derived clearing rate and
+     * slippage floor safe against same-block manipulation.
+     */
+    function _requireSpotNearTwap() private view {
+        uint32 window = twapWindow;
+        if (window == 0) return; // guard disabled (documented, owner-set)
+
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = window;
+        secondsAgos[1] = 0;
+        (int56[] memory tickCumulatives, ) = uniPool.observe(secondsAgos);
+
+        int56 delta = tickCumulatives[1] - tickCumulatives[0];
+        int24 twapTick = int24(delta / int56(uint56(window)));
+        // Uniswap rounds tick cumulatives toward negative infinity.
+        if (delta < 0 && (delta % int56(uint56(window)) != 0)) twapTick--;
+
+        (, int24 spotTick, , , , , ) = uniPool.slot0();
+        int24 diff = spotTick >= twapTick ? spotTick - twapTick : twapTick - spotTick;
+        if (uint24(diff) > maxTickDeviation) revert Kairos_PriceDeviation(spotTick, twapTick);
     }
 
     /// @dev priceX96 = (token1/token0) * 2^96, from the pool's current sqrt price.
     function _priceX96() private view returns (uint256) {
         (uint160 sqrtPriceX96, , , , , , ) = uniPool.slot0();
-        return Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
+        uint256 p = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
+        if (p == 0) revert Kairos_InvalidParam(); // unreachable at sane prices
+        return p;
     }
 
     function _baseToQuote(uint256 baseAmount, uint256 priceX96) private view returns (uint256) {
@@ -725,12 +945,21 @@ contract KairosPool is Ownable2Step, ReentrancyGuard, IUniswapV3SwapCallback {
         (int256 a0, int256 a1) = uniPool.swap(
             address(this),
             zeroForOne,
-            int256(amountIn),
+            SafeCast.toInt256(amountIn),
             zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
             ""
         );
         _inSwap = false;
-        out = uint256(-(zeroForOne ? a1 : a0));
+
+        // Defensive: a well-behaved pool always returns a negative output delta and
+        // consumes the full exact input. Both are cheap to assert and both would
+        // otherwise silently mis-account the payout.
+        int256 outDelta = zeroForOne ? a1 : a0;
+        int256 inDelta = zeroForOne ? a0 : a1;
+        if (outDelta >= 0) revert Kairos_SlippageExceeded(0, minOut);
+        if (uint256(inDelta) != amountIn) revert Kairos_PartialSwap(uint256(inDelta), amountIn);
+
+        out = uint256(-outDelta);
         if (out < minOut) revert Kairos_SlippageExceeded(out, minOut);
     }
 }

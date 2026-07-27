@@ -2,14 +2,17 @@
 pragma solidity ^0.8.35;
 
 /// @notice Minimal Uniswap V3 pool interface — only what KairosPool needs.
-/// The canonical SwapRouter is not deployed on Sepolia, so we swap directly
-/// against the pool (composability without any router dependency).
+/// We swap directly against the pool rather than through the periphery router:
+/// one fewer hop, no periphery dependency, and the callback lets us pay from
+/// contract-held funds without an intermediate approval.
 interface IUniswapV3PoolMinimal {
     function token0() external view returns (address);
 
     function token1() external view returns (address);
 
     function fee() external view returns (uint24);
+
+    function liquidity() external view returns (uint128);
 
     function slot0()
         external
@@ -23,6 +26,17 @@ interface IUniswapV3PoolMinimal {
             uint8 feeProtocol,
             bool unlocked
         );
+
+    /// @notice Time-weighted oracle accumulators. Reverts if the pool lacks
+    /// observation history covering `secondsAgos`.
+    function observe(
+        uint32[] calldata secondsAgos
+    )
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128);
+
+    function increaseObservationCardinalityNext(uint16 observationCardinalityNext) external;
 
     /// @notice Exact-input/-output swap. Positive amountSpecified = exact input.
     /// Caller must implement IUniswapV3SwapCallback and pay the input there.
