@@ -13,7 +13,16 @@
       "Bash(grep -oE '0x[a-fA-F0-9]{40}|[Cc]hain[ _-]?[Ii][Dd][^<]{0,20}|Sepolia|Arbitrum|NoxCompute[A-Za-z]*')",
       "WebFetch(domain:cdefi-wizard.iex.ec)",
       "WebFetch(domain:docs.uniswap.org)",
-      "WebFetch(domain:developers.uniswap.org)"
+      "WebFetch(domain:developers.uniswap.org)",
+      "Bash(npm install *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['name'], d['version']\\); print\\('exports:', list\\(d.get\\('exports',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(npx hardhat *)",
+      "Bash(docker info *)",
+      "Bash(npm pkg *)",
+      "Bash(docker system *)",
+      "Bash(docker container *)",
+      "Bash(docker volume *)",
+      "Bash(npm cache *)"
     ]
   }
 }

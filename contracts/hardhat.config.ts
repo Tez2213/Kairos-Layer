@@ -1,15 +1,16 @@
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
+import noxPlugin from "@iexec-nox/nox-hardhat-plugin";
 import { configVariable, defineConfig } from "hardhat/config";
 
 export default defineConfig({
-  plugins: [hardhatToolboxViemPlugin],
+  plugins: [hardhatToolboxViemPlugin, noxPlugin],
   solidity: {
     profiles: {
       default: {
-        version: "0.8.28",
+        version: "0.8.35",
       },
       production: {
-        version: "0.8.28",
+        version: "0.8.35",
         settings: {
           optimizer: {
             enabled: true,
@@ -20,11 +21,8 @@ export default defineConfig({
     },
   },
   networks: {
-    hardhatMainnet: {
-      type: "edr-simulated",
-      chainType: "l1",
-    },
-    hardhatOp: {
+    // Nox local stack requires an op-chainType simulated network as default.
+    default: {
       type: "edr-simulated",
       chainType: "op",
     },

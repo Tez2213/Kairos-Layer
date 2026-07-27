@@ -3,12 +3,22 @@
   "version": "1.0.0",
   "type": "module",
   "devDependencies": {
+    "@iexec-nox/nox-hardhat-plugin": "^0.1.0",
     "@nomicfoundation/hardhat-ignition": "^3.1.8",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
     "@types/node": "^22.20.1",
+    "@uniswap/v3-core": "^1.0.1",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "hardhat": "^3.11.1",
     "typescript": "~5.8.0",
     "viem": "^2.55.10"
+  },
+  "dependencies": {
+    "@iexec-nox/nox-confidential-contracts": "^0.2.2",
+    "@iexec-nox/nox-protocol-contracts": "^0.2.4"
+  },
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile"
   }
 }
