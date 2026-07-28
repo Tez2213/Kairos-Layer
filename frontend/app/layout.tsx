@@ -21,10 +21,18 @@ const display = Instrument_Serif({
   weight: ["400"],
 });
 
+const TITLE = "Kairos Layer — confidential dark pool on Ethereum";
+const DESCRIPTION =
+  "Encrypted orders matched against each other in a TEE; only the unmatched residual reaches Uniswap. Built on iExec Nox, live on Ethereum Sepolia.";
+
 export const metadata: Metadata = {
-  title: "Kairos Layer — confidential dark pool on Ethereum",
-  description:
-    "Encrypted orders matched against each other in a TEE; only the unmatched residual reaches Uniswap. Built on iExec Nox, live on Ethereum Sepolia.",
+  // Needed for absolute URLs in the social card; opengraph-image.png in this
+  // directory is picked up automatically.
+  metadataBase: new URL("https://kairos-layerr.vercel.app"),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, type: "website" },
+  twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

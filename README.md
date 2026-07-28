@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/public/logo.png" alt="Kairos Layer" width="360">
+</p>
+
 # Kairos Layer
 
 **A dark pool for Ethereum.** Submit a swap order and nobody sees the size — not the

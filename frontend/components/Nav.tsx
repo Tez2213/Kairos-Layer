@@ -34,8 +34,10 @@ export function Nav() {
     <>
       {/* mobile bar */}
       <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-paper px-4 py-3">
-        <Link href="/" className="font-display text-[1.25rem] leading-none">
-          Kairos Layer
+        <Link href="/" className="flex items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/mark.png" alt="" aria-hidden className="h-[26px] w-[26px] object-contain" />
+          <span className="font-display text-[1.25rem] leading-none">Kairos Layer</span>
         </Link>
         <button
           onClick={() => setOpen((o) => !o)}
@@ -52,7 +54,11 @@ export function Nav() {
       >
         <div className="px-6 py-7 hidden lg:block">
           <Link href="/" className="block">
-            <div className="font-display text-[1.55rem] leading-none">Kairos Layer</div>
+            {/* Stacked, not inline: the 264px rail is too narrow to sit the mark
+                beside the wordmark without wrapping the subtitle. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/mark.png" alt="" aria-hidden className="h-14 w-14 object-contain -ml-1" />
+            <div className="font-display text-[1.55rem] leading-none mt-3">Kairos Layer</div>
             <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-3 mt-2">
               Confidential dark pool
             </div>
