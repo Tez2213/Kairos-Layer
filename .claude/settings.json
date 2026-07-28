@@ -97,7 +97,10 @@
       "Read(//home/ujwal/Desktop/**)",
       "Bash(gh run *)",
       "Bash(sed -i 's|actions/checkout@v4|actions/checkout@v5|; s|actions/setup-node@v4|actions/setup-node@v5|' .github/workflows/keeper.yml)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo \"  {} key-shaped strings — inspecting:\"; git diff --cached | grep -oE \"0x[a-fA-F0-9]{64}\" | sort -u; else echo \"  no key-shaped strings in staged diff ✓\"; fi')",
+      "Bash(git commit *)",
+      "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=14000 --screenshot=/tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/home-wide.png --window-size=1920,1080 --hide-scrollbars http://localhost:3000/)"
     ]
   }
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
+import { DragonMark, GetStartedButton } from "@/components/Chrome";
 import { WalletProvider } from "@/lib/wallet";
 
 const sans = IBM_Plex_Sans({
@@ -34,7 +35,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     >
       <body className="min-h-full">
         <WalletProvider>
-          <div className="lg:flex">
+          <DragonMark />
+          <GetStartedButton />
+          <div className="lg:flex relative z-10">
             <Nav />
             <main className="flex-1 lg:ml-[264px] min-w-0">
               <div className="max-w-[900px] px-6 lg:px-12 py-10 lg:py-16">{children}</div>
