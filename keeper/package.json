@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node keeper.mjs",
     "once": "node keeper.mjs --once",
-    "dry": "node keeper.mjs --dry-run --once"
+    "dry": "node keeper.mjs --dry-run --once",
+    "sync-abi": "node -e \"const fs=require('fs');fs.writeFileSync('abi.json',JSON.stringify(JSON.parse(fs.readFileSync('../contracts/artifacts/contracts/KairosPool.sol/KairosPool.json','utf8')).abi,null,2)+'\\n')\""
   },
   "dependencies": {
     "@iexec-nox/handle": "0.1.0-beta.13",

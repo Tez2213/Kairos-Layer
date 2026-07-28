@@ -94,7 +94,10 @@
       "Bash(curl -s -X POST https://sepolia.drpc.org -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0xfced18bc0ea5c90b6307f403aa0f21f291b7b7a5\",\"data\":\"0x8da5cb5b\"},\"latest\"]}')",
       "Bash(python3 -c \"import json,sys; print\\('owner =', '0x'+json.load\\(sys.stdin\\)['result'][-40:]\\)\")",
       "Bash(timeout 90 npm run dry)",
-      "Read(//home/ujwal/Desktop/**)"
+      "Read(//home/ujwal/Desktop/**)",
+      "Bash(gh run *)",
+      "Bash(sed -i 's|actions/checkout@v4|actions/checkout@v5|; s|actions/setup-node@v4|actions/setup-node@v5|' .github/workflows/keeper.yml)",
+      "Bash(git add *)"
     ]
   }
 }

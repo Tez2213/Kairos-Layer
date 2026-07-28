@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -37,19 +37,14 @@ jobs:
         working-directory: keeper
         run: npm ci
 
-      # The keeper reads contracts/.env; in CI we synthesise it from secrets so
-      # no key is ever committed. KEEPER_PRIVATE_KEY must be a burner that holds
-      # gas and nothing else — it cannot touch user funds even if leaked.
-      - name: Configure
-        run: |
-          {
-            echo "SEPOLIA_RPC_URL=${{ secrets.SEPOLIA_RPC_URL }}"
-            echo "KEEPER_PRIVATE_KEY=${{ secrets.KEEPER_PRIVATE_KEY }}"
-          } > contracts/.env
-
+      # Secrets are passed as environment variables, never written to disk on the
+      # runner. KEEPER_PRIVATE_KEY must be a burner that holds gas and nothing
+      # else — it cannot touch user funds or protocol parameters even if leaked.
       - name: Run one settlement pass
         working-directory: keeper
         env:
+          KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
           # Roll an idle pool at most twice an hour so gas tracks real usage.
           KEEPER_SEAL_EMPTY_AFTER_S: "1800"
         run: npm run once

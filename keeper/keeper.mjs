@@ -75,9 +75,14 @@ const env = {
   ),
 };
 const D = JSON.parse(readFileSync(new URL("deployments.json", root), "utf8"));
-const POOL_ABI = JSON.parse(
-  readFileSync(new URL("artifacts/contracts/KairosPool.sol/KairosPool.json", root), "utf8"),
-).abi;
+
+/**
+ * The ABI is vendored here rather than read from contracts/artifacts, which is a
+ * build output and gitignored — a CI runner has no compiled artifacts, so reading
+ * from there fails at startup. Regenerate with `npm run sync-abi` after changing
+ * the contract.
+ */
+const POOL_ABI = JSON.parse(readFileSync(new URL("./abi.json", import.meta.url), "utf8"));
 
 const RPCS = [
   env.SEPOLIA_RPC_URL,
@@ -87,10 +92,25 @@ const RPCS = [
 
 const rawKey = env.KEEPER_PRIVATE_KEY || env.SEPOLIA_PRIVATE_KEY;
 if (!rawKey) {
-  console.error("No KEEPER_PRIVATE_KEY or SEPOLIA_PRIVATE_KEY in contracts/.env");
+  console.error(
+    [
+      "No keeper key found.",
+      "  local: copy keeper/.env.example to keeper/.env and set KEEPER_PRIVATE_KEY",
+      "  CI:    add a KEEPER_PRIVATE_KEY repository secret (Settings → Secrets → Actions)",
+      "Use a burner that only holds gas — never the deployer key, which owns the contract.",
+    ].join("\n"),
+  );
   process.exit(1);
 }
-const account = privateKeyToAccount(rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`);
+const key = rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`;
+if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
+  console.error(
+    `KEEPER_PRIVATE_KEY is malformed (${key.length - 2} hex chars, expected 64). ` +
+      "If this came from a CI secret, check it was pasted whole and without quotes.",
+  );
+  process.exit(1);
+}
+const account = privateKeyToAccount(key);
 
 const pub = createPublicClient({
   chain: sepolia,
