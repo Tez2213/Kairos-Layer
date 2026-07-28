@@ -109,7 +109,8 @@
       "Bash(awk '{printf \"  %s %.0f KB\\\\n\", $9, $5/1024}')",
       "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=13000 --screenshot=/tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/logo-desktop.png --window-size=1600,620 --hide-scrollbars http://localhost:3000/)",
       "Bash(brave-browser --headless --disable-gpu --no-sandbox --virtual-time-budget=11000 --screenshot=/tmp/claude-1000/-home-ujwal-Desktop-hackathon/9e95d582-b00a-47df-8f04-2c274613bf6b/scratchpad/logo-mobile.png --window-size=520,300 --hide-scrollbars http://localhost:3000/)",
-      "Bash(awk '{printf \"  %-28s %6.0f KB\\\\n\", $9, $5/1024}')"
+      "Bash(awk '{printf \"  %-28s %6.0f KB\\\\n\", $9, $5/1024}')",
+      "Bash(bc)"
     ],
     "additionalDirectories": [
       "/home/ujwal/Desktop/hackathon/frontend/app"
